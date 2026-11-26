@@ -1,0 +1,2251 @@
+KODE REDESIGN VEGETASI — KLINIK DESA ASKLEPIOS
+PETUNJUK: File ini berisi dua source code lengkap. Buat/perbarui file sesuai path yang tertulis. Jangan tempel seluruh isi ke satu file.
+
+========================================================================================
+PATH: src/three/dioramaVegetation.ts
+========================================================================================
+import * as THREE from 'three';
+
+/**
+ * Lightweight procedural vegetation for the Asklepios village diorama.
+ * Most repeated details are batched into InstancedMesh objects so the scene
+ * gains density and species variety without introducing hundreds of draw calls.
+ */
+
+export interface VillageVegetationSystem {
+  group: THREE.Group;
+  update: (elapsed: number, windStrength: number) => void;
+  dispose: () => void;
+}
+
+type TreeKind = 'broadleaf' | 'blossom' | 'orchard' | 'conifer' | 'willow';
+
+interface TreeDefinition {
+  x: number;
+  z: number;
+  height: number;
+  radius: number;
+  kind: TreeKind;
+  phase: number;
+  wind: number;
+}
+
+interface InstanceRecord {
+  position: THREE.Vector3;
+  rotation: THREE.Euler;
+  scale: THREE.Vector3;
+  color: number;
+  tree?: TreeDefinition;
+  localPosition?: THREE.Vector3;
+}
+
+interface DynamicInstanceRecord extends InstanceRecord {
+  mesh: THREE.InstancedMesh;
+  index: number;
+}
+
+interface RoadRect {
+  x: number;
+  z: number;
+  halfW: number;
+  halfD: number;
+  rotation: number;
+}
+
+interface BedDefinition {
+  x: number;
+  z: number;
+  label: string;
+  species: 'mint' | 'lavender' | 'chamomile' | 'aloe' | 'rosemary';
+  rotation: number;
+}
+
+const ROAD_RECTS: RoadRect[] = [
+  { x: 0, z: -4.5, halfW: 4.75, halfD: 2.6, rotation: 0 },
+  { x: 0, z: 1.5, halfW: 1.4, halfD: 6.25, rotation: 0 },
+  { x: 0, z: 6.8, halfW: 11, halfD: 1.3, rotation: 0 },
+  { x: 5.8, z: -1.8, halfW: 3.75, halfD: 1.2, rotation: 0.2 },
+  { x: -7.5, z: -2.5, halfW: 4.25, halfD: 1.15, rotation: -0.35 },
+  { x: 0, z: 10.5, halfW: 9, halfD: 2.1, rotation: 0 },
+];
+
+const BUILDING_RECTS: RoadRect[] = [
+  { x: 0, z: -10.8, halfW: 4.5, halfD: 2.8, rotation: 0 },
+  { x: 8.8, z: -2.2, halfW: 2.8, halfD: 2.5, rotation: 0 },
+  { x: -5.8, z: 12.6, halfW: 2.0, halfD: 1.35, rotation: 0 },
+  { x: 0, z: 13.0, halfW: 2.0, halfD: 1.35, rotation: 0 },
+  { x: 5.8, z: 12.6, halfW: 2.0, halfD: 1.35, rotation: 0 },
+  { x: -12.0, z: -9.8, halfW: 2.1, halfD: 1.9, rotation: 0.25 },
+  { x: 12.0, z: -9.8, halfW: 2.1, halfD: 1.9, rotation: -0.25 },
+  { x: -12.2, z: -1.2, halfW: 2.1, halfD: 1.9, rotation: 0.55 },
+  { x: -11.5, z: 5.8, halfW: 2.1, halfD: 1.9, rotation: 0.4 },
+  { x: -12.2, z: 11.8, halfW: 2.1, halfD: 1.9, rotation: 0.5 },
+  { x: 12.2, z: 5.2, halfW: 2.1, halfD: 1.9, rotation: -0.5 },
+  { x: 12.0, z: 11.8, halfW: 2.1, halfD: 1.9, rotation: -0.45 },
+];
+
+const HERB_BEDS: BedDefinition[] = [
+  { x: 12.45, z: -6.1, label: 'DAUN MINT', species: 'mint', rotation: -0.1 },
+  { x: 6.25, z: -7.85, label: 'LAVENDER', species: 'lavender', rotation: 0.12 },
+  { x: -8.15, z: -6.2, label: 'KAMILA', species: 'chamomile', rotation: -0.08 },
+  { x: -8.6, z: 2.25, label: 'ALOE & ROSEMARY', species: 'aloe', rotation: 0.08 },
+];
+
+function mulberry32(seed: number): () => number {
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6d2b79f5;
+    let v = t;
+    v = Math.imul(v ^ (v >>> 15), v | 1);
+    v ^= v + Math.imul(v ^ (v >>> 7), v | 61);
+    return ((v ^ (v >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function insideRect(x: number, z: number, rect: RoadRect, margin: number): boolean {
+  const dx = x - rect.x;
+  const dz = z - rect.z;
+  const c = Math.cos(rect.rotation);
+  const s = Math.sin(rect.rotation);
+  const lx = dx * c + dz * s;
+  const lz = -dx * s + dz * c;
+  return Math.abs(lx) < rect.halfW + margin && Math.abs(lz) < rect.halfD + margin;
+}
+
+function isOnRoad(x: number, z: number, margin: number): boolean {
+  return ROAD_RECTS.some((r) => insideRect(x, z, r, margin));
+}
+
+function isNearBuilding(x: number, z: number, margin: number): boolean {
+  return BUILDING_RECTS.some((r) => insideRect(x, z, r, margin));
+}
+
+function inPond(x: number, z: number, margin: number): boolean {
+  const dx = x / (6.15 + margin);
+  const dz = (z - 1.6) / (3.05 + margin);
+  return dx * dx + dz * dz < 1;
+}
+
+function inHerbBed(x: number, z: number, margin: number): boolean {
+  return HERB_BEDS.some((bed) => {
+    const c = Math.cos(bed.rotation);
+    const s = Math.sin(bed.rotation);
+    const dx = x - bed.x;
+    const dz = z - bed.z;
+    const lx = dx * c + dz * s;
+    const lz = -dx * s + dz * c;
+    return Math.abs(lx) < 1.65 + margin && Math.abs(lz) < 0.95 + margin;
+  });
+}
+
+function isGroundClear(x: number, z: number, margin: number): boolean {
+  if (Math.abs(x) > 16.05 || Math.abs(z) > 16.05) return false;
+  if (isOnRoad(x, z, margin)) return false;
+  if (isNearBuilding(x, z, margin)) return false;
+  if (inPond(x, z, margin)) return false;
+  if (inHerbBed(x, z, margin)) return false;
+  return true;
+}
+
+function createCanopyTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const gradient = ctx.createLinearGradient(0, 0, 128, 128);
+    gradient.addColorStop(0, '#eef4d8');
+    gradient.addColorStop(0.48, '#c9dfad');
+    gradient.addColorStop(1, '#a6c995');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 128, 128);
+
+    const rand = mulberry32(401);
+    for (let i = 0; i < 270; i++) {
+      const x = rand() * 128;
+      const y = rand() * 128;
+      const w = 2.5 + rand() * 8;
+      const h = 1.5 + rand() * 4.5;
+      const hue = Math.floor(88 + rand() * 35);
+      const light = Math.floor(32 + rand() * 28);
+      ctx.fillStyle = `hsla(${hue}, 35%, ${light}%, ${0.18 + rand() * 0.32})`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, w, h, rand() * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 0.18;
+    ctx.strokeStyle = '#d8edaf';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 18; i++) {
+      const x = rand() * 128;
+      const y = rand() * 128;
+      ctx.beginPath();
+      ctx.moveTo(x - 5, y + 3);
+      ctx.quadraticCurveTo(x, y - 2, x + 6, y - 5);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.anisotropy = 2;
+  return texture;
+}
+
+function createLeafTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const grad = ctx.createLinearGradient(8, 0, 56, 128);
+    grad.addColorStop(0, '#e5f4c4');
+    grad.addColorStop(0.45, '#b5d98c');
+    grad.addColorStop(1, '#86b36b');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(32, 2);
+    ctx.bezierCurveTo(60, 27, 59, 90, 32, 126);
+    ctx.bezierCurveTo(5, 90, 4, 27, 32, 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(225, 245, 174, 0.78)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(32, 5);
+    ctx.quadraticCurveTo(35, 64, 32, 123);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(224, 244, 174, 0.46)';
+    ctx.lineWidth = 0.75;
+    for (let y = 22; y <= 100; y += 15) {
+      const spread = Math.sin((y / 128) * Math.PI) * 22;
+      ctx.beginPath();
+      ctx.moveTo(32, y);
+      ctx.quadraticCurveTo(32 - spread * 0.55, y - 2, 32 - spread, y - 9);
+      ctx.moveTo(32, y);
+      ctx.quadraticCurveTo(32 + spread * 0.55, y - 2, 32 + spread, y - 9);
+      ctx.stroke();
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 2;
+  return texture;
+}
+
+function createLeafGeometry(): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  const rows = [
+    { y: 0, w: 0.015, z: 0 },
+    { y: 0.24, w: 0.22, z: 0.025 },
+    { y: 0.5, w: 0.34, z: 0.045 },
+    { y: 0.76, w: 0.22, z: 0.025 },
+    { y: 1, w: 0.006, z: 0 },
+  ];
+  rows.forEach((row, index) => {
+    positions.push(-row.w, row.y, row.z, row.w, row.y, row.z);
+    uvs.push(0, index / (rows.length - 1), 1, index / (rows.length - 1));
+  });
+  for (let i = 0; i < rows.length - 1; i++) {
+    const a = i * 2;
+    const b = a + 2;
+    indices.push(a, b, a + 1, a + 1, b, b + 1);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function createGrassTuftGeometry(): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let blade = 0; blade < 3; blade++) {
+    const angle = (blade / 3) * Math.PI * 2;
+    const dx = Math.cos(angle);
+    const dz = Math.sin(angle);
+    const px = -dz;
+    const pz = dx;
+    const start = positions.length / 3;
+    const height = 0.55 + blade * 0.13;
+    const width = 0.095 - blade * 0.012;
+    const levels = [
+      { y: 0, w: width, push: 0 },
+      { y: height * 0.52, w: width * 0.52, push: 0.075 },
+      { y: height, w: 0, push: 0.16 },
+    ];
+    levels.forEach((level) => {
+      const cx = dx * level.push;
+      const cz = dz * level.push;
+      positions.push(cx - px * level.w, level.y, cz - pz * level.w);
+      positions.push(cx + px * level.w, level.y, cz + pz * level.w);
+    });
+    indices.push(
+      start, start + 2, start + 1,
+      start + 1, start + 2, start + 3,
+      start + 2, start + 4, start + 3
+    );
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function addMatrixRecord(
+  mesh: THREE.InstancedMesh,
+  index: number,
+  record: InstanceRecord,
+  dynamicRecords: DynamicInstanceRecord[]
+): void {
+  const dummy = new THREE.Object3D();
+  dummy.position.copy(record.position);
+  dummy.rotation.copy(record.rotation);
+  dummy.scale.copy(record.scale);
+  dummy.updateMatrix();
+  mesh.setMatrixAt(index, dummy.matrix);
+  mesh.setColorAt(index, new THREE.Color(record.color));
+  if (record.tree && record.localPosition) {
+    dynamicRecords.push({ ...record, mesh, index });
+  }
+}
+
+function createInstanced(
+  group: THREE.Group,
+  geometry: THREE.BufferGeometry,
+  material: THREE.Material,
+  records: InstanceRecord[],
+  options: { castShadow?: boolean; receiveShadow?: boolean; dynamicRecords?: DynamicInstanceRecord[] } = {}
+): THREE.InstancedMesh | null {
+  if (records.length === 0) return null;
+  const mesh = new THREE.InstancedMesh(geometry, material, records.length);
+  mesh.instanceMatrix.setUsage(records.some((record) => Boolean(record.tree && record.localPosition)) ? THREE.DynamicDrawUsage : THREE.StaticDrawUsage);
+  mesh.castShadow = options.castShadow ?? false;
+  mesh.receiveShadow = options.receiveShadow ?? false;
+  records.forEach((record, index) => {
+    addMatrixRecord(mesh, index, record, options.dynamicRecords ?? []);
+  });
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.computeBoundingSphere();
+  group.add(mesh);
+  return mesh;
+}
+
+function transformRecord(
+  position: THREE.Vector3,
+  scale: THREE.Vector3,
+  color: number,
+  rotation = new THREE.Euler(),
+  tree?: TreeDefinition,
+  localPosition?: THREE.Vector3
+): InstanceRecord {
+  return { position, scale, color, rotation, tree, localPosition };
+}
+
+function makeTreeDefinitions(): TreeDefinition[] {
+  return [
+    { x: -15.2, z: -14.5, height: 4.4, radius: 0.29, kind: 'broadleaf', phase: 0.4, wind: 0.9 },
+    { x: -7.2, z: -14.2, height: 3.8, radius: 0.23, kind: 'blossom', phase: 1.7, wind: 0.8 },
+    { x: 7.4, z: -14.2, height: 4.0, radius: 0.24, kind: 'blossom', phase: 2.1, wind: 0.85 },
+    { x: 15.2, z: -14.5, height: 4.5, radius: 0.29, kind: 'broadleaf', phase: 2.8, wind: 0.95 },
+    { x: -15.4, z: -5.2, height: 4.0, radius: 0.25, kind: 'blossom', phase: 0.9, wind: 0.85 },
+    { x: 15.4, z: -4.8, height: 4.5, radius: 0.3, kind: 'orchard', phase: 1.3, wind: 0.8 },
+    { x: -15.2, z: 3.0, height: 4.4, radius: 0.28, kind: 'broadleaf', phase: 2.4, wind: 0.95 },
+    { x: 15.2, z: 1.8, height: 4.0, radius: 0.25, kind: 'blossom', phase: 0.2, wind: 0.82 },
+    { x: -15.2, z: 14.8, height: 4.0, radius: 0.25, kind: 'blossom', phase: 1.1, wind: 0.82 },
+    { x: 15.2, z: 14.8, height: 4.5, radius: 0.29, kind: 'broadleaf', phase: 2.7, wind: 0.9 },
+    { x: -5.2, z: 15.4, height: 3.7, radius: 0.22, kind: 'orchard', phase: 0.6, wind: 0.78 },
+    { x: 5.2, z: 15.4, height: 4.3, radius: 0.24, kind: 'conifer', phase: 1.9, wind: 0.55 },
+    { x: -11.8, z: -14.9, height: 3.5, radius: 0.19, kind: 'conifer', phase: 2.3, wind: 0.5 },
+    { x: 12.0, z: -14.8, height: 3.8, radius: 0.2, kind: 'willow', phase: 0.5, wind: 1.05 },
+    { x: -14.7, z: 9.0, height: 3.7, radius: 0.21, kind: 'orchard', phase: 1.5, wind: 0.75 },
+    { x: 14.8, z: 9.0, height: 3.8, radius: 0.22, kind: 'willow', phase: 2.9, wind: 1.0 },
+  ];
+}
+
+function createHerbSignTexture(label: string): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 96;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = '#e9dfc2';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#7b573a';
+    ctx.lineWidth = 7;
+    ctx.strokeRect(4, 4, 248, 88);
+    ctx.fillStyle = '#294f3f';
+    ctx.font = 'bold 27px Georgia, serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 128, 48, 224);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function addCylinderRecord(
+  records: InstanceRecord[],
+  a: THREE.Vector3,
+  b: THREE.Vector3,
+  radius: number,
+  color: number,
+  randomScale = 1
+): void {
+  const direction = new THREE.Vector3().subVectors(b, a);
+  const length = direction.length();
+  const position = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5);
+  const rotation = new THREE.Euler().setFromQuaternion(
+    new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize())
+  );
+  records.push(
+    transformRecord(position, new THREE.Vector3(radius * randomScale, length, radius * randomScale), color, rotation)
+  );
+}
+
+export function buildVillageVegetation(isConstrainedGpu: boolean): VillageVegetationSystem {
+  const group = new THREE.Group();
+  group.name = 'Asklepios Botanical World';
+  const rand = mulberry32(20261125);
+  const canopyTexture = createCanopyTexture();
+  const leafTexture = createLeafTexture();
+  const herbSignTextures: THREE.CanvasTexture[] = [];
+
+  const barkMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.94 });
+  const branchMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.96 });
+  const canopyMaterial = new THREE.MeshStandardMaterial({
+    map: canopyTexture,
+    color: 0xffffff,
+    roughness: 0.94,
+    metalness: 0,
+  });
+  const coniferMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, map: canopyTexture, roughness: 0.96 });
+  const fruitMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.68 });
+  const leafMaterial = new THREE.MeshStandardMaterial({
+    map: leafTexture,
+    color: 0xffffff,
+    roughness: 0.88,
+    metalness: 0,
+    transparent: true,
+    alphaTest: 0.22,
+    side: THREE.DoubleSide,
+  });
+  const grassMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, side: THREE.DoubleSide });
+  const shrubMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.98, map: canopyTexture });
+  const flowerPetalMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.86 });
+  const flowerCenterMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.82 });
+  const flowerStemMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 });
+  const rockMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.98 });
+  const mushroomStemMaterial = new THREE.MeshStandardMaterial({ color: 0xf1e4c9, roughness: 0.92 });
+  const mushroomCapMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.78 });
+  const vineMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.96 });
+  const herbSoilMaterial = new THREE.MeshStandardMaterial({ color: 0x684a36, roughness: 1 });
+  const herbWoodMaterial = new THREE.MeshStandardMaterial({ color: 0x92613e, roughness: 0.92 });
+
+  const leafGeometry = createLeafGeometry();
+  const canopyGeometry = new THREE.SphereGeometry(1, 14, 11);
+  const canopyPositions = canopyGeometry.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < canopyPositions.count; i++) {
+    const x = canopyPositions.getX(i);
+    const y = canopyPositions.getY(i);
+    const z = canopyPositions.getZ(i);
+    const n = Math.sin(x * 8.7 + z * 4.1) * Math.cos(y * 7.8 + x * 3.3);
+    const factor = 1 + n * 0.035;
+    canopyPositions.setXYZ(i, x * factor, y * (1 + n * 0.025), z * factor);
+  }
+  canopyGeometry.computeVertexNormals();
+  const coniferGeometry = new THREE.ConeGeometry(1, 1, 9, 2);
+  const trunkGeometry = new THREE.CylinderGeometry(0.13, 0.22, 1, 7, 2);
+  const branchGeometry = new THREE.CylinderGeometry(0.045, 0.095, 1, 6, 1);
+  const fruitGeometry = new THREE.SphereGeometry(0.12, 8, 7);
+
+  const treeDefinitions = makeTreeDefinitions();
+  const trunkRecords: InstanceRecord[] = [];
+  const branchRecords: InstanceRecord[] = [];
+  const canopyRecords: InstanceRecord[] = [];
+  const coniferRecords: InstanceRecord[] = [];
+  const fruitRecords: InstanceRecord[] = [];
+  const treeLeafRecords: InstanceRecord[] = [];
+  const dynamicRecords: DynamicInstanceRecord[] = [];
+
+  const greenCanopy = [0x9ac96f, 0x7fb95e, 0x6fa75c, 0xb1cf7a, 0x5f9658, 0x8cbd6b];
+  const blossomCanopy = [0xf3b4bc, 0xf8d1c2, 0xe9a6b6, 0xffdfd0, 0xf4c1ce];
+  const orchardFruit = [0xd85e4e, 0xe6a33c, 0x8eaf4c, 0xb96d70];
+
+  treeDefinitions.forEach((tree, treeIndex) => {
+    const h = tree.height;
+    const base = new THREE.Vector3(tree.x, 0, tree.z);
+    trunkRecords.push(
+      transformRecord(
+        new THREE.Vector3(tree.x, h * 0.48, tree.z),
+        new THREE.Vector3(tree.radius * 1.6, h * 0.96, tree.radius * 1.6),
+        treeIndex % 3 === 0 ? 0x80583e : 0x906548
+      )
+    );
+
+    const branchCount = tree.kind === 'conifer' ? 2 : 3;
+    for (let b = 0; b < branchCount; b++) {
+      const angle = (b / branchCount) * Math.PI * 2 + tree.phase;
+      const start = new THREE.Vector3(tree.x, h * (0.48 + b * 0.065), tree.z);
+      const end = new THREE.Vector3(
+        tree.x + Math.cos(angle) * (0.72 + tree.radius),
+        h * (0.69 + (b % 2) * 0.07),
+        tree.z + Math.sin(angle) * (0.72 + tree.radius)
+      );
+      addCylinderRecord(branchRecords, start, end, 0.09, 0x765039, 0.8 + rand() * 0.35);
+    }
+
+    // Four broad roots make the trunks feel embedded in the meadow.
+    for (let r = 0; r < 4; r++) {
+      const angle = (r / 4) * Math.PI * 2 + tree.phase;
+      const rootEnd = new THREE.Vector3(tree.x + Math.cos(angle) * (0.58 + tree.radius), 0.035, tree.z + Math.sin(angle) * (0.58 + tree.radius));
+      addCylinderRecord(branchRecords, new THREE.Vector3(tree.x, 0.16, tree.z), rootEnd, 0.065, 0x896044, 0.8);
+    }
+
+    if (tree.kind === 'conifer') {
+      [0, 1, 2, 3].forEach((layer) => {
+        const y = h * (0.37 + layer * 0.17);
+        const layerScale = 1.45 - layer * 0.22;
+        const local = new THREE.Vector3(0, y, 0);
+        coniferRecords.push(
+          transformRecord(
+            base.clone().add(local),
+            new THREE.Vector3(layerScale * tree.radius * 4.4, h * 0.34, layerScale * tree.radius * 4.4),
+            [0x3f8156, 0x4b9360, 0x5ca36b, 0x39764f][layer],
+            new THREE.Euler(),
+            tree,
+            local
+          )
+        );
+      });
+    } else {
+      const crownY = tree.kind === 'willow' ? h * 0.73 : h * 0.76;
+      const crownRadius = tree.kind === 'willow' ? tree.radius * 4.4 : tree.radius * 4.1;
+      const clusterOffsets: [number, number, number, number][] = [
+        [0, 0.1, 0, 1],
+        [-0.68, -0.22, 0.34, 0.76],
+        [0.68, -0.16, -0.3, 0.8],
+        [-0.22, -0.05, -0.7, 0.72],
+        [0.22, -0.12, 0.68, 0.75],
+        [0.1, 0.55, 0.08, 0.66],
+      ];
+      const clusterCount = tree.kind === 'willow' ? 6 : 5;
+      for (let c = 0; c < clusterCount; c++) {
+        const [ox, oy, oz, size] = clusterOffsets[c];
+        const local = new THREE.Vector3(ox * crownRadius, crownY + oy * crownRadius * 0.58, oz * crownRadius);
+        const color = tree.kind === 'blossom' && (c % 2 === 0 || c === 4)
+          ? blossomCanopy[(treeIndex + c) % blossomCanopy.length]
+          : greenCanopy[(treeIndex * 2 + c) % greenCanopy.length];
+        const sx = crownRadius * size * (0.92 + rand() * 0.18);
+        const sy = crownRadius * size * (0.74 + rand() * 0.18);
+        const sz = crownRadius * size * (0.9 + rand() * 0.22);
+        const worldPos = base.clone().add(local);
+        canopyRecords.push(
+          transformRecord(
+            worldPos,
+            new THREE.Vector3(sx, sy, sz),
+            color,
+            new THREE.Euler(rand() * 0.18, rand() * Math.PI, rand() * 0.18),
+            tree,
+            local
+          )
+        );
+      }
+
+      if (tree.kind === 'willow') {
+        for (let d = 0; d < 4; d++) {
+          const angle = (d / 4) * Math.PI * 2;
+          const local = new THREE.Vector3(Math.cos(angle) * crownRadius * 0.85, h * 0.46, Math.sin(angle) * crownRadius * 0.85);
+          canopyRecords.push(
+            transformRecord(
+              base.clone().add(local),
+              new THREE.Vector3(crownRadius * 0.42, h * 0.26, crownRadius * 0.42),
+              greenCanopy[(treeIndex + d + 2) % greenCanopy.length],
+              new THREE.Euler(0, rand() * Math.PI, Math.sin(angle) * 0.18),
+              tree,
+              local
+            )
+          );
+        }
+      }
+
+      if (tree.kind === 'orchard') {
+        for (let f = 0; f < 9; f++) {
+          const angle = rand() * Math.PI * 2;
+          const radius = crownRadius * (0.42 + rand() * 0.45);
+          const local = new THREE.Vector3(
+            Math.cos(angle) * radius,
+            crownY + (rand() - 0.5) * crownRadius * 1.0,
+            Math.sin(angle) * radius
+          );
+          const size = 0.65 + rand() * 0.35;
+          fruitRecords.push(
+            transformRecord(
+              base.clone().add(local),
+              new THREE.Vector3(size, size, size),
+              orchardFruit[f % orchardFruit.length],
+              new THREE.Euler(rand(), rand() * Math.PI, rand()),
+              tree,
+              local
+            )
+          );
+        }
+      }
+    }
+
+    // Small leaf cards sit on the canopy silhouette; the leaf texture includes a central vein.
+    const leafCount = tree.kind === 'willow' ? 11 : tree.kind === 'conifer' ? 0 : 8;
+    for (let l = 0; l < leafCount; l++) {
+      const angle = rand() * Math.PI * 2;
+      const ring = tree.radius * (2.4 + rand() * 2.1);
+      const local = new THREE.Vector3(
+        Math.cos(angle) * ring,
+        h * (0.59 + rand() * 0.3),
+        Math.sin(angle) * ring
+      );
+      const position = base.clone().add(local);
+      const color = tree.kind === 'blossom' && l % 3 === 0 ? 0xf1bdc8 : greenCanopy[(treeIndex + l) % greenCanopy.length];
+      treeLeafRecords.push(
+        transformRecord(
+          position,
+          new THREE.Vector3(0.42 + rand() * 0.24, 0.52 + rand() * 0.24, 0.75),
+          color,
+          new THREE.Euler(rand() * Math.PI, angle, (rand() - 0.5) * 1.8),
+          tree,
+          local
+        )
+      );
+    }
+  });
+
+  // A few smaller ornamental trees fill gaps between the perimeter landmarks.
+  const smallTrees: TreeDefinition[] = [
+    { x: -10.0, z: 14.6, height: 2.8, radius: 0.16, kind: 'blossom', phase: 0.7, wind: 0.7 },
+    { x: 10.1, z: 14.7, height: 2.9, radius: 0.17, kind: 'orchard', phase: 2.0, wind: 0.7 },
+    { x: -14.8, z: -10.0, height: 2.9, radius: 0.16, kind: 'willow', phase: 1.2, wind: 0.85 },
+    { x: 14.7, z: -10.0, height: 2.7, radius: 0.15, kind: 'conifer', phase: 2.6, wind: 0.5 },
+  ];
+  smallTrees.forEach((tree, idx) => {
+    const h = tree.height;
+    trunkRecords.push(transformRecord(new THREE.Vector3(tree.x, h * 0.48, tree.z), new THREE.Vector3(tree.radius * 1.55, h * 0.96, tree.radius * 1.55), 0x8b6046));
+    if (tree.kind === 'conifer') {
+      for (let layer = 0; layer < 3; layer++) {
+        const y = h * (0.42 + layer * 0.2);
+        const s = (1.25 - layer * 0.22) * tree.radius * 4.2;
+        const local = new THREE.Vector3(0, y, 0);
+        coniferRecords.push(transformRecord(new THREE.Vector3(tree.x, 0, tree.z).add(local), new THREE.Vector3(s, h * 0.38, s), [0x3e7d52, 0x4e945e, 0x609d68][layer], new THREE.Euler(), tree, local));
+      }
+    } else {
+      for (let c = 0; c < 4; c++) {
+        const angle = (c / 4) * Math.PI * 2;
+        const local = new THREE.Vector3(Math.cos(angle) * tree.radius * 2.1, h * 0.73 + (c % 2) * 0.18, Math.sin(angle) * tree.radius * 2.1);
+        canopyRecords.push(transformRecord(new THREE.Vector3(tree.x, 0, tree.z).add(local), new THREE.Vector3(tree.radius * 2.1, tree.radius * 1.65, tree.radius * 2.1), tree.kind === 'blossom' ? 0xf1bdc8 : 0x83b968, new THREE.Euler(), tree, local));
+      }
+    }
+    if (tree.kind === 'orchard') {
+      for (let f = 0; f < 5; f++) {
+        const a = (f / 5) * Math.PI * 2;
+        const local = new THREE.Vector3(Math.cos(a) * tree.radius * 2.0, h * 0.72 + (f % 2) * 0.14, Math.sin(a) * tree.radius * 2.0);
+        fruitRecords.push(transformRecord(new THREE.Vector3(tree.x, 0, tree.z).add(local), new THREE.Vector3(0.65, 0.65, 0.65), orchardFruit[f % orchardFruit.length], new THREE.Euler(), tree, local));
+      }
+    }
+    for (let l = 0; l < 4; l++) {
+      const a = (l / 4) * Math.PI * 2 + idx;
+      const local = new THREE.Vector3(Math.cos(a) * tree.radius * 2.2, h * 0.7, Math.sin(a) * tree.radius * 2.2);
+      treeLeafRecords.push(transformRecord(new THREE.Vector3(tree.x, 0, tree.z).add(local), new THREE.Vector3(0.38, 0.48, 0.7), 0x92be6a, new THREE.Euler(0.2, a, 0.4), tree, local));
+    }
+  });
+
+  const trunkMesh = createInstanced(group, trunkGeometry, barkMaterial, trunkRecords, { castShadow: true });
+  const branchMesh = createInstanced(group, branchGeometry, branchMaterial, branchRecords, { castShadow: true });
+  const canopyMesh = createInstanced(group, canopyGeometry, canopyMaterial, canopyRecords, { castShadow: true, dynamicRecords });
+  const coniferMesh = createInstanced(group, coniferGeometry, coniferMaterial, coniferRecords, { castShadow: true, dynamicRecords });
+  const fruitMesh = createInstanced(group, fruitGeometry, fruitMaterial, fruitRecords, { dynamicRecords });
+  const treeLeafMesh = createInstanced(group, leafGeometry, leafMaterial, treeLeafRecords, { castShadow: false, dynamicRecords });
+
+  // Candidate cells are jittered, then rejected around paths, structures, the pond and herb plots.
+  const groundCandidates: THREE.Vector3[] = [];
+  for (let z = -15.3; z <= 15.3; z += 0.92) {
+    for (let x = -15.3; x <= 15.3; x += 0.92) {
+      const px = x + (rand() - 0.5) * 0.54;
+      const pz = z + (rand() - 0.5) * 0.54;
+      if (!isGroundClear(px, pz, 0.12)) continue;
+      if (treeDefinitions.some((tree) => Math.hypot(px - tree.x, pz - tree.z) < 1.75)) continue;
+      if (smallTrees.some((tree) => Math.hypot(px - tree.x, pz - tree.z) < 1.25)) continue;
+      groundCandidates.push(new THREE.Vector3(px, 0, pz));
+    }
+  }
+
+  const shuffledCandidates = [...groundCandidates];
+  for (let i = shuffledCandidates.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [shuffledCandidates[i], shuffledCandidates[j]] = [shuffledCandidates[j], shuffledCandidates[i]];
+  }
+
+  const detailOccupied: THREE.Vector3[] = [];
+  const pickSpaced = (count: number, minDistance: number, margin = 0.12, reserve = false): THREE.Vector3[] => {
+    const picked: THREE.Vector3[] = [];
+    for (const candidate of shuffledCandidates) {
+      if (picked.length >= count) break;
+      if (!isGroundClear(candidate.x, candidate.z, margin)) continue;
+      if (reserve && detailOccupied.some((p) => p.distanceTo(candidate) < minDistance * 0.78)) continue;
+      if (picked.every((p) => p.distanceTo(candidate) > minDistance)) {
+        picked.push(candidate);
+        if (reserve) detailOccupied.push(candidate);
+      }
+    }
+    return picked;
+  };
+
+  // Meadow grass: tuft geometry contains three curved blades, all drawn in one batch.
+  const grassPositions = pickSpaced(isConstrainedGpu ? 320 : 470, 0.56);
+  const grassRecords: InstanceRecord[] = grassPositions.map((p) => {
+    const scale = 0.55 + rand() * 0.75;
+    const palette = [0x70a95b, 0x83b765, 0x5e9855, 0x9ac56f, 0x739e4e, 0xabc979];
+    return transformRecord(
+      new THREE.Vector3(p.x, 0.015, p.z),
+      new THREE.Vector3(scale, scale * (0.72 + rand() * 0.42), scale),
+      palette[Math.floor(rand() * palette.length)],
+      new THREE.Euler(0, rand() * Math.PI * 2, (rand() - 0.5) * 0.18)
+    );
+  });
+  const grassGeometry = createGrassTuftGeometry();
+  createInstanced(group, grassGeometry, grassMaterial, grassRecords, { receiveShadow: false });
+
+  // Low shrubs are made from several differently scaled lobes instead of repeated single spheres.
+  const shrubGeometry = new THREE.IcosahedronGeometry(0.5, 1);
+  const shrubPositions = pickSpaced(isConstrainedGpu ? 28 : 42, 1.55, 0.7, true);
+  const shrubRecords: InstanceRecord[] = [];
+  const shrubPalette = [0x4f8750, 0x5e9958, 0x78a95e, 0x8ab56b, 0x467a4b];
+  shrubPositions.forEach((p) => {
+    const size = 0.48 + rand() * 0.52;
+    for (let l = 0; l < 3; l++) {
+      const a = (l / 3) * Math.PI * 2 + rand() * 0.5;
+      const offset = l === 0 ? 0 : size * 0.38;
+      shrubRecords.push(
+        transformRecord(
+          new THREE.Vector3(p.x + Math.cos(a) * offset, size * (0.43 + rand() * 0.1), p.z + Math.sin(a) * offset),
+          new THREE.Vector3(size * (0.75 + rand() * 0.3), size * (0.6 + rand() * 0.25), size * (0.72 + rand() * 0.3)),
+          shrubPalette[Math.floor(rand() * shrubPalette.length)],
+          new THREE.Euler(rand() * 0.25, rand() * Math.PI, rand() * 0.25)
+        )
+      );
+    }
+  });
+  createInstanced(group, shrubGeometry, shrubMaterial, shrubRecords, { castShadow: true });
+
+  // Wildflower clusters with four seasonal palettes and subtle variations in height.
+  const flowerPositions = pickSpaced(isConstrainedGpu ? 38 : 58, 1.15, 0.12, true);
+  const petalGeometry = new THREE.SphereGeometry(1, 8, 6);
+  const centerGeometry = new THREE.SphereGeometry(1, 8, 6);
+  const stemGeometry = new THREE.CylinderGeometry(0.012, 0.02, 1, 5, 1);
+  const petalRecords: InstanceRecord[] = [];
+  const centerRecords: InstanceRecord[] = [];
+  const stemRecords: InstanceRecord[] = [];
+  const flowerPalette = [0xf7e7bf, 0xf6c3d0, 0xe7b7ef, 0xffd77c, 0xf4f0de];
+  flowerPositions.forEach((p, clusterIndex) => {
+    const heads = 2 + Math.floor(rand() * 3);
+    for (let head = 0; head < heads; head++) {
+      const angle = rand() * Math.PI * 2;
+      const offset = rand() * 0.34;
+      const h = 0.24 + rand() * 0.22;
+      const base = new THREE.Vector3(p.x + Math.cos(angle) * offset, 0, p.z + Math.sin(angle) * offset);
+      const top = base.clone().add(new THREE.Vector3(Math.cos(angle) * 0.055, h, Math.sin(angle) * 0.055));
+      addCylinderRecord(stemRecords, base, top, 0.018, 0x5f8d4f, 0.8 + rand() * 0.4);
+      const paletteColor = flowerPalette[(clusterIndex + head + Math.floor(rand() * flowerPalette.length)) % flowerPalette.length];
+      const headCenter = top.clone().add(new THREE.Vector3(0, 0.035, 0));
+      for (let petal = 0; petal < 5; petal++) {
+        const a = (petal / 5) * Math.PI * 2;
+        const petalScale = 0.72 + rand() * 0.35;
+        petalRecords.push(
+          transformRecord(
+            headCenter.clone().add(new THREE.Vector3(Math.cos(a) * 0.085, 0, Math.sin(a) * 0.085)),
+            new THREE.Vector3(0.075 * petalScale, 0.045 * petalScale, 0.035 * petalScale),
+            paletteColor,
+            new THREE.Euler(rand() * 0.2, a, (rand() - 0.5) * 0.2)
+          )
+        );
+      }
+      centerRecords.push(
+        transformRecord(headCenter.clone().add(new THREE.Vector3(0, 0.012, 0)), new THREE.Vector3(0.046, 0.046, 0.046), 0xd9a84d)
+      );
+    }
+  });
+  createInstanced(group, stemGeometry, flowerStemMaterial, stemRecords);
+  createInstanced(group, petalGeometry, flowerPetalMaterial, petalRecords);
+  createInstanced(group, centerGeometry, flowerCenterMaterial, centerRecords);
+
+  // Small decorative rocks, mushroom colonies and root-side ground details.
+  const rockGeometry = new THREE.DodecahedronGeometry(0.5, 0);
+  const rockPositions = pickSpaced(isConstrainedGpu ? 28 : 44, 1.05, 0.18, true);
+  const rockPalette = [0x8b9187, 0xa4a292, 0x777f77, 0xb5aa96, 0x9b8976];
+  const rockRecords: InstanceRecord[] = rockPositions.map((p) => {
+    const scale = 0.18 + rand() * 0.34;
+    return transformRecord(
+      new THREE.Vector3(p.x, scale * 0.32, p.z),
+      new THREE.Vector3(scale * (1.1 + rand() * 0.8), scale * (0.55 + rand() * 0.6), scale),
+      rockPalette[Math.floor(rand() * rockPalette.length)],
+      new THREE.Euler(rand() * 0.35, rand() * Math.PI, rand() * 0.35)
+    );
+  });
+  createInstanced(group, rockGeometry, rockMaterial, rockRecords, { castShadow: true });
+
+  const mushroomPositions = pickSpaced(isConstrainedGpu ? 9 : 15, 2.0, 0.12, true).filter((p) =>
+    treeDefinitions.some((tree) => Math.hypot(tree.x - p.x, tree.z - p.z) < 3.2)
+  );
+  const mushroomStemGeo = new THREE.CylinderGeometry(0.035, 0.055, 0.22, 7);
+  const mushroomCapGeo = new THREE.SphereGeometry(0.12, 9, 6, 0, Math.PI * 2, 0, Math.PI * 0.56);
+  const mushroomStemRecords: InstanceRecord[] = [];
+  const mushroomCapRecords: InstanceRecord[] = [];
+  mushroomPositions.forEach((p) => {
+    const count = 2 + Math.floor(rand() * 3);
+    for (let i = 0; i < count; i++) {
+      const a = rand() * Math.PI * 2;
+      const offset = rand() * 0.36;
+      const scale = 0.65 + rand() * 0.8;
+      const x = p.x + Math.cos(a) * offset;
+      const z = p.z + Math.sin(a) * offset;
+      mushroomStemRecords.push(transformRecord(new THREE.Vector3(x, 0.11 * scale, z), new THREE.Vector3(scale, scale, scale), 0xffffff));
+      mushroomCapRecords.push(transformRecord(new THREE.Vector3(x, 0.22 * scale, z), new THREE.Vector3(scale, scale, scale), [0xd97964, 0xe8a45e, 0xb7a4ce][i % 3]));
+    }
+  });
+  createInstanced(group, mushroomStemGeo, mushroomStemMaterial, mushroomStemRecords);
+  createInstanced(group, mushroomCapGeo, mushroomCapMaterial, mushroomCapRecords);
+
+  // Herbal beds make the pharmacy identity visible in the environment, not only in UI.
+  const herbLeafRecords: InstanceRecord[] = [];
+  const herbStemRecords: InstanceRecord[] = [];
+  const herbFlowerPetals: InstanceRecord[] = [];
+  const herbFlowerCenters: InstanceRecord[] = [];
+  const bedSoilGeometry = new THREE.BoxGeometry(3.0, 0.14, 1.72);
+  const bedRailLong = new THREE.BoxGeometry(3.1, 0.19, 0.13);
+  const bedRailShort = new THREE.BoxGeometry(0.13, 0.19, 1.78);
+  const labelPlane = new THREE.PlaneGeometry(0.88, 0.34);
+
+  HERB_BEDS.forEach((bed, bedIndex) => {
+    const bedGroup = new THREE.Group();
+    bedGroup.position.set(bed.x, 0, bed.z);
+    bedGroup.rotation.y = bed.rotation;
+    const soil = new THREE.Mesh(bedSoilGeometry, herbSoilMaterial);
+    soil.position.y = 0.08;
+    soil.receiveShadow = true;
+    bedGroup.add(soil);
+    const frontRail = new THREE.Mesh(bedRailLong, herbWoodMaterial);
+    frontRail.position.set(0, 0.15, 0.82);
+    const backRail = new THREE.Mesh(bedRailLong, herbWoodMaterial);
+    backRail.position.set(0, 0.15, -0.82);
+    const leftRail = new THREE.Mesh(bedRailShort, herbWoodMaterial);
+    leftRail.position.set(-1.49, 0.15, 0);
+    const rightRail = new THREE.Mesh(bedRailShort, herbWoodMaterial);
+    rightRail.position.set(1.49, 0.15, 0);
+    bedGroup.add(frontRail, backRail, leftRail, rightRail);
+
+    const signPost = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.72, 6), herbWoodMaterial);
+    signPost.position.set(1.02, 0.4, 0.68);
+    const signTexture = createHerbSignTexture(bed.label);
+    herbSignTextures.push(signTexture);
+    const sign = new THREE.Mesh(
+      labelPlane,
+      new THREE.MeshStandardMaterial({ map: signTexture, roughness: 0.8, side: THREE.DoubleSide })
+    );
+    sign.position.set(1.02, 0.72, 0.68);
+    bedGroup.add(signPost, sign);
+    group.add(bedGroup);
+
+    const plantCount = bed.species === 'aloe' ? 5 : 7;
+    for (let i = 0; i < plantCount; i++) {
+      const localX = -1.05 + (i % 4) * 0.68 + (rand() - 0.5) * 0.14;
+      const localZ = -0.42 + Math.floor(i / 4) * 0.72 + (rand() - 0.5) * 0.12;
+      const c = Math.cos(bed.rotation);
+      const s = Math.sin(bed.rotation);
+      const worldX = bed.x + localX * c + localZ * s;
+      const worldZ = bed.z - localX * s + localZ * c;
+      const baseY = 0.18;
+      const plantSpecies = bed.species === 'aloe' && i % 2 === 1 ? 'rosemary' : bed.species;
+      const leafNum = plantSpecies === 'aloe' ? 7 : plantSpecies === 'rosemary' ? 9 : 6;
+      for (let l = 0; l < leafNum; l++) {
+        const a = (l / leafNum) * Math.PI * 2 + rand() * 0.35;
+        const height = plantSpecies === 'aloe' ? 0.46 + rand() * 0.22 : plantSpecies === 'rosemary' ? 0.34 + rand() * 0.18 : 0.34 + rand() * 0.26;
+        const radial = plantSpecies === 'aloe' ? 0.2 + rand() * 0.18 : 0.12 + rand() * 0.16;
+        const leafPos = new THREE.Vector3(worldX + Math.cos(a) * radial * 0.55, baseY + height * 0.38, worldZ + Math.sin(a) * radial * 0.55);
+        const leafColor = plantSpecies === 'aloe' ? 0x78a96a : plantSpecies === 'rosemary' ? 0x648b58 : 0x79ad63;
+        const leafScale = plantSpecies === 'rosemary' ? new THREE.Vector3(0.2, height * 0.95, 0.62) : new THREE.Vector3(0.34, height, 0.68);
+        herbLeafRecords.push(transformRecord(leafPos, leafScale, leafColor, new THREE.Euler(Math.cos(a) * 0.9, a, Math.sin(a) * 0.8)));
+      }
+      const stemHeight = bed.species === 'lavender' ? 0.76 : bed.species === 'chamomile' ? 0.5 : 0.38;
+      const stemA = new THREE.Vector3(worldX, baseY, worldZ);
+      const stemB = new THREE.Vector3(worldX + (rand() - 0.5) * 0.08, baseY + stemHeight, worldZ + (rand() - 0.5) * 0.08);
+      addCylinderRecord(herbStemRecords, stemA, stemB, 0.022, 0x4d8149, 0.8);
+
+      if (bed.species === 'lavender' || bed.species === 'chamomile') {
+        const headCenter = stemB.clone().add(new THREE.Vector3(0, 0.02, 0));
+        const petals = bed.species === 'lavender' ? 4 : 7;
+        const petalColor = bed.species === 'lavender' ? 0xa98bc9 : 0xf4eedb;
+        for (let p = 0; p < petals; p++) {
+          const a = (p / petals) * Math.PI * 2;
+          herbFlowerPetals.push(
+            transformRecord(
+              headCenter.clone().add(new THREE.Vector3(Math.cos(a) * 0.065, 0, Math.sin(a) * 0.065)),
+              new THREE.Vector3(0.06, 0.04, 0.035),
+              petalColor,
+              new THREE.Euler(0, a, 0)
+            )
+          );
+        }
+        herbFlowerCenters.push(transformRecord(headCenter, new THREE.Vector3(0.038, 0.038, 0.038), 0xd9a84d));
+      }
+    }
+  });
+
+  createInstanced(group, leafGeometry, leafMaterial, herbLeafRecords);
+  createInstanced(group, stemGeometry, flowerStemMaterial, herbStemRecords);
+  createInstanced(group, petalGeometry, flowerPetalMaterial, herbFlowerPetals);
+  createInstanced(group, centerGeometry, flowerCenterMaterial, herbFlowerCenters);
+
+  // Climbing vines are laid out on cottage facades using shared instanced stems and leaf cards.
+  const vineStemRecords: InstanceRecord[] = [];
+  const vineLeafRecords: InstanceRecord[] = [];
+  const cottageSpecs: [number, number, number][] = [
+    [-12.0, -9.8, 0.25],
+    [12.0, -9.8, -0.25],
+    [-12.2, -1.2, 0.55],
+    [-11.5, 5.8, 0.4],
+    [-12.2, 11.8, 0.5],
+    [12.2, 5.2, -0.5],
+    [12.0, 11.8, -0.45],
+  ];
+  cottageSpecs.forEach(([cx, cz, rotation], houseIndex) => {
+    for (let side = 0; side < 2; side++) {
+      const localX = side === 0 ? -1.48 : 1.48;
+      const points: THREE.Vector3[] = [];
+      for (let p = 0; p < 5; p++) {
+        const localZ = 1.54 + Math.sin(p * 1.1 + houseIndex) * 0.055;
+        const px = localX + Math.sin(p * 1.12 + houseIndex * 0.7) * 0.18;
+        const py = 0.18 + p * 0.54;
+        const wx = cx + px * Math.cos(rotation) + localZ * Math.sin(rotation);
+        const wz = cz - px * Math.sin(rotation) + localZ * Math.cos(rotation);
+        points.push(new THREE.Vector3(wx, py, wz));
+      }
+      for (let p = 0; p < points.length - 1; p++) {
+        addCylinderRecord(vineStemRecords, points[p], points[p + 1], 0.018, 0x477e4b, 1);
+      }
+      points.forEach((point, p) => {
+        if (p === 0) return;
+        const leafA = new THREE.Vector3(point.x - 0.12, point.y + 0.08, point.z + 0.025);
+        const leafB = new THREE.Vector3(point.x + 0.12, point.y - 0.02, point.z + 0.025);
+        vineLeafRecords.push(transformRecord(leafA, new THREE.Vector3(0.25, 0.34, 0.7), 0x78aa61, new THREE.Euler(0.3, rotation, -0.7)));
+        vineLeafRecords.push(transformRecord(leafB, new THREE.Vector3(0.24, 0.32, 0.7), 0x63984f, new THREE.Euler(-0.2, rotation, 0.7)));
+      });
+    }
+  });
+  createInstanced(group, branchGeometry, vineMaterial, vineStemRecords);
+  createInstanced(group, leafGeometry, leafMaterial, vineLeafRecords);
+
+  // Subtle extra foliage around the conservatory and apothecary columns.
+  const accentLeafRecords: InstanceRecord[] = [];
+  [
+    [5.4, 0.5, -9.5], [5.8, 0.8, -9.2], [11.2, 0.6, -3.8], [6.6, 0.6, -3.7],
+    [-3.6, 0.55, -8.5], [3.6, 0.55, -8.5],
+  ].forEach(([x, y, z], index) => {
+    for (let leaf = 0; leaf < 5; leaf++) {
+      const a = (leaf / 5) * Math.PI * 2;
+      accentLeafRecords.push(
+        transformRecord(
+          new THREE.Vector3(x + Math.cos(a) * 0.18, y + rand() * 0.28, z + Math.sin(a) * 0.18),
+          new THREE.Vector3(0.2, 0.34, 0.65),
+          index % 2 === 0 ? 0x75a95d : 0x92bb6b,
+          new THREE.Euler(0.55, a, 0.2)
+        )
+      );
+    }
+  });
+  createInstanced(group, leafGeometry, leafMaterial, accentLeafRecords);
+
+  const allDynamicRecords = [...dynamicRecords];
+  const axisX = new THREE.Vector3(1, 0, 0);
+  const axisZ = new THREE.Vector3(0, 0, 1);
+  const offset = new THREE.Vector3();
+  const dummy = new THREE.Object3D();
+  const baseQuaternion = new THREE.Quaternion();
+  const windQuaternion = new THREE.Quaternion();
+
+  return {
+    group,
+    dispose: () => {
+      canopyTexture.dispose();
+      leafTexture.dispose();
+      herbSignTextures.forEach((texture) => texture.dispose());
+    },
+    update: (elapsed: number, windStrength: number) => {
+      if (allDynamicRecords.length === 0) return;
+      const touchedMeshes = new Set<THREE.InstancedMesh>();
+      allDynamicRecords.forEach((record) => {
+        const tree = record.tree;
+        if (!tree || !record.localPosition) return;
+        const sway = Math.sin(elapsed * 1.22 + tree.phase) * 0.035 * tree.wind * windStrength;
+        offset.copy(record.localPosition);
+        offset.applyAxisAngle(axisZ, sway);
+        offset.applyAxisAngle(axisX, sway * 0.22);
+        dummy.position.set(tree.x + offset.x, offset.y, tree.z + offset.z);
+        baseQuaternion.setFromEuler(record.rotation);
+        windQuaternion.setFromAxisAngle(axisZ, sway);
+        dummy.quaternion.copy(windQuaternion).multiply(baseQuaternion);
+        dummy.scale.copy(record.scale);
+        dummy.updateMatrix();
+        record.mesh.setMatrixAt(record.index, dummy.matrix);
+        touchedMeshes.add(record.mesh);
+      });
+      touchedMeshes.forEach((mesh) => {
+        mesh.instanceMatrix.needsUpdate = true;
+      });
+    },
+  };
+}
+
+========================================================================================
+PATH: src/components/VillageDiorama3D.tsx
+========================================================================================
+import React, { useEffect, useRef, useState } from 'react';
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import {
+  CheckCircle2,
+  Clock,
+  CloudRain,
+  MessageCircle,
+  Moon,
+  Stethoscope,
+  Sun,
+  Volume2,
+  VolumeX,
+  Wind,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
+import { CASES } from '../data/cases';
+import { AVATARS, CHARACTERS, WEATHER_INFO } from '../data/characters';
+import { AvatarId, CaseScenario, CharacterId, EmotionType, WeatherType } from '../types/pharmacy';
+import { villageAmbientAudio } from '../utils/ambientAudio';
+import { soundFX } from '../utils/sound';
+import { ChibiCharacterRig, buildChibiCharacter3D } from '../three/dioramaCharacters';
+import { TimePhaseName, createDayNightLightingRig, getTimePhaseLabel } from '../three/dioramaLighting';
+import { createDioramaMaterials } from '../three/dioramaMaterials';
+import { createWeatherParticleSystem } from '../three/dioramaWeather';
+import {
+  ColliderBox,
+  buildApothecaryPavilion,
+  buildFloatingIsland,
+  buildHospitalBuilding,
+  buildMarketStall,
+  buildPondAndBridge,
+  buildVillagerCottage,
+} from '../three/dioramaProps';
+import { buildVillageVegetation } from '../three/dioramaVegetation';
+import { CharacterPortrait } from './CharacterPortrait';
+import { VirtualJoystick } from './VirtualJoystick';
+
+interface VillageDiorama3DProps {
+  selectedAvatar: AvatarId;
+  weather: WeatherType;
+  onChangeWeather: (w: WeatherType) => void;
+  completedCases: string[];
+  activeCaseId?: string | null;
+  onSelectCase: (scenario: CaseScenario) => void;
+}
+
+const WEATHER_ICONS: Record<WeatherType, React.ReactNode> = {
+  [WeatherType.CERAH_HANGAT]: <Sun className="w-4 h-4" />,
+  [WeatherType.HUJAN_LEMBAP]: <CloudRain className="w-4 h-4" />,
+  [WeatherType.ANGIN_PANCAROBA]: <Wind className="w-4 h-4" />,
+  [WeatherType.KABUT_MALAM]: <Moon className="w-4 h-4" />,
+};
+
+interface NpcStation {
+  id: CharacterId;
+  x: number;
+  z: number;
+  rotY: number;
+  caseId?: string;
+  mentorQuote?: string;
+}
+
+const NPC_STATIONS: NpcStation[] = [
+  // Mentors around Hospital & Pharmacy Pavilion
+  {
+    id: 'bima',
+    x: -1.6,
+    z: -6.4,
+    rotY: 0.2,
+    mentorQuote:
+      'Dr. Bima: Selamat datang di RS Utama Asklepios! Saya menyiapkan resep klinis, pastikan Anda menyaring dosis dan alergi pasien.',
+  },
+  {
+    id: 'hana',
+    x: 1.8,
+    z: -6.4,
+    rotY: -0.2,
+    mentorQuote:
+      'Perawat Hana: Ruang rawat dan pompa infus sudah siap. Jaga laju TPM tetap berada di Therapeutic Window ya!',
+  },
+  {
+    id: 'lios',
+    x: 6.4,
+    z: -0.2,
+    rotY: -0.5,
+    mentorQuote:
+      'Guru Lios: Di Paviliun Apotek ini kita meracik terapi modern dan menjaga standar antibiotik rasional desa.',
+  },
+  {
+    id: 'alia',
+    x: 9.8,
+    z: 0.2,
+    rotY: -0.4,
+    mentorQuote:
+      'Alia: Klik warga bertanda seru merah (!) atau dekati dengan analog untuk mulai mewawancarai dan menyaring resep mereka.',
+  },
+  {
+    id: 'sekar',
+    x: -7.8,
+    z: 5.8,
+    rotY: 0.9,
+    mentorQuote:
+      'Mbah Sekar: Tanaman Meniran dan Temulawak di kios selatan berkhasiat +15% lebih kuat saat cuaca Cerah Hangat!',
+  },
+  // 7 Villager Patients near cottages & market stalls
+  { id: 'koko', x: -10.5, z: -6.8, rotY: 0.4, caseId: 'case-koko' },
+  { id: 'geri', x: 10.6, z: -6.8, rotY: -0.4, caseId: 'case-geri' },
+  { id: 'mimi', x: -9.8, z: 0.8, rotY: 0.8, caseId: 'case-mimi' },
+  { id: 'nino', x: 5.5, z: 9.8, rotY: -0.2, caseId: 'case-nino' },
+  { id: 'riko', x: 10.2, z: 5.2, rotY: -0.8, caseId: 'case-riko' },
+  { id: 'bobi', x: 9.2, z: 10.4, rotY: -0.6, caseId: 'case-bobi' },
+  { id: 'pipi', x: -9.8, z: 10.2, rotY: 0.6, caseId: 'case-pipi' },
+];
+
+// Pre-allocated zero-GC math helpers
+const _raycaster = new THREE.Raycaster();
+const _mouse = new THREE.Vector2();
+const _groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const _intersectPt = new THREE.Vector3();
+
+function groundHeightAt(x: number, z: number): number {
+  // Raised arch over the central stone bridge at x in [-1.4, 1.4], z in [-1.0, 4.2]
+  if (Math.abs(x) <= 1.45 && z >= -0.9 && z <= 4.1) {
+    const t = (z - 1.6) / 2.5;
+    return Math.max(0, Math.cos(t * (Math.PI / 2)) * 0.62 + 0.16);
+  }
+  return 0;
+}
+
+export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
+  selectedAvatar,
+  weather,
+  onChangeWeather,
+  completedCases,
+  activeCaseId = null,
+  onSelectCase,
+}) => {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const minimapRef = useRef<HTMLCanvasElement | null>(null);
+
+  const weatherRef = useRef<WeatherType>(weather);
+  const completedRef = useRef<string[]>(completedCases);
+  const activeCaseIdRef = useRef<string | null>(activeCaseId);
+  const talkingNpcIdRef = useRef<CharacterId | null>(null);
+  const avatarRef = useRef<AvatarId>(selectedAvatar);
+  const zoomRef = useRef<number>(1.0);
+  const dayPhaseRef = useRef<number>((0.08 + (completedCases.length % 7) * 0.08) % 1);
+  const targetPhaseRef = useRef<number | null>(null);
+  const nightLockBlendRef = useRef<number>(weather === WeatherType.KABUT_MALAM ? 1 : 0);
+  const prevCompletedLenRef = useRef<number>(completedCases.length);
+
+  const playerStateRef = useRef({
+    x: 0,
+    z: -2.2,
+    rotY: 0,
+    walkPhase: 0,
+    speed: 6.8,
+    autoTarget: null as { x: number; z: number } | null,
+    autoInteractNpcId: null as CharacterId | null,
+  });
+
+  const keysRef = useRef<Record<string, boolean>>({});
+  const joystickRef = useRef<{ active: boolean; dx: number; dy: number }>({
+    active: false,
+    dx: 0,
+    dy: 0,
+  });
+
+  const [nearbyNpc, setNearbyNpc] = useState<NpcStation | null>(null);
+  const [mentorBubble, setMentorBubble] = useState<{ id: CharacterId; text: string } | null>(null);
+  const [ambientMuted, setAmbientMuted] = useState(() => villageAmbientAudio.isLocalMuted());
+  const [timePhaseLabel, setTimePhaseLabel] = useState<TimePhaseName>(() =>
+    weather === WeatherType.KABUT_MALAM
+      ? 'Malam Tenang'
+      : getTimePhaseLabel((0.08 + (completedCases.length % 7) * 0.08) % 1)
+  );
+
+  const onSelectCaseRef = useRef(onSelectCase);
+  useEffect(() => {
+    onSelectCaseRef.current = onSelectCase;
+  }, [onSelectCase]);
+
+  useEffect(() => {
+    weatherRef.current = weather;
+    villageAmbientAudio.setWeather(weather);
+  }, [weather]);
+
+  useEffect(() => {
+    completedRef.current = completedCases;
+    if (completedCases.length > prevCompletedLenRef.current) {
+      dayPhaseRef.current = (dayPhaseRef.current + 0.08) % 1;
+    }
+    prevCompletedLenRef.current = completedCases.length;
+  }, [completedCases]);
+
+  useEffect(() => {
+    activeCaseIdRef.current = activeCaseId;
+  }, [activeCaseId]);
+
+  useEffect(() => {
+    talkingNpcIdRef.current = mentorBubble ? mentorBubble.id : null;
+  }, [mentorBubble]);
+
+  useEffect(() => {
+    avatarRef.current = selectedAvatar;
+  }, [selectedAvatar]);
+
+  const interactWithStation = (station: NpcStation) => {
+    soundFX.playClick();
+    if (station.caseId) {
+      const found = CASES.find((c) => c.id === station.caseId);
+      if (found) {
+        onSelectCaseRef.current(found);
+        return;
+      }
+    }
+    if (station.mentorQuote) {
+      setMentorBubble({ id: station.id, text: station.mentorQuote });
+    }
+  };
+
+  const triggerRef = useRef<() => void>(() => {});
+  triggerRef.current = () => {
+    if (nearbyNpc) {
+      interactWithStation(nearbyNpc);
+    }
+  };
+
+  const handleJoystickVector = (dx: number, dy: number, active: boolean) => {
+    if (active) {
+      villageAmbientAudio.start(weatherRef.current);
+    }
+    joystickRef.current = { active, dx, dy };
+    if (active && (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05)) {
+      playerStateRef.current.autoTarget = null;
+      playerStateRef.current.autoInteractNpcId = null;
+    }
+  };
+
+  // Start ambient soundscape on mount (if already unlocked) or first interaction, and clean up on unmount
+  useEffect(() => {
+    villageAmbientAudio.start(weatherRef.current);
+    const unlockAmbient = () => {
+      villageAmbientAudio.start(weatherRef.current);
+    };
+    window.addEventListener('pointerdown', unlockAmbient, { passive: true });
+    window.addEventListener('keydown', unlockAmbient, { passive: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockAmbient);
+      window.removeEventListener('keydown', unlockAmbient);
+      villageAmbientAudio.stop();
+    };
+  }, []);
+
+  // Keyboard movement + Space/E interact
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      const k = e.key.toLowerCase();
+      if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
+        e.preventDefault();
+        keysRef.current[k] = true;
+        playerStateRef.current.autoTarget = null;
+        playerStateRef.current.autoInteractNpcId = null;
+      }
+      if (k === 'e' || e.code === 'Space') {
+        if (tag !== 'BUTTON') {
+          e.preventDefault();
+          triggerRef.current();
+        }
+      }
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      keysRef.current[e.key.toLowerCase()] = false;
+    };
+
+    const onBlur = () => {
+      keysRef.current = {};
+      joystickRef.current = { active: false, dx: 0, dy: 0 };
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
+  // Main Three.js WebGL 3D Isometric Diorama Lifecycle
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    const gpuProfile = (() => {
+      const gl = document.createElement('canvas').getContext('webgl2');
+      if (!gl) return { software: true, integrated: false };
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      const param = ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER;
+      const gpu = String(gl.getParameter(param));
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      return {
+        software: /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu),
+        integrated: /Intel|UHD Graphics|Iris|Iris Xe|Radeon Graphics|Vega|Apple M[1-4]/i.test(gpu),
+      };
+    })();
+    const isSoftwareGl = gpuProfile.software;
+    // Chromium exposes an approximate memory tier on some devices; use it only
+    // as a conservative quality hint, never as a gameplay capability check.
+    const reportedMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8;
+    const isConstrainedGpu = isSoftwareGl || gpuProfile.integrated || reportedMemory <= 8;
+
+    const renderer = new THREE.WebGLRenderer({
+      antialias: !isConstrainedGpu,
+      powerPreference: 'high-performance',
+    });
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.08;
+    renderer.setPixelRatio(isSoftwareGl ? 1 : isConstrainedGpu ? Math.min(window.devicePixelRatio, 1.25) : Math.min(window.devicePixelRatio, 1.75));
+    renderer.shadowMap.enabled = !isSoftwareGl;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    const initW = container.clientWidth || 900;
+    const initH = container.clientHeight || 520;
+    renderer.setSize(initW, initH);
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    renderer.domElement.style.display = 'block';
+    renderer.domElement.style.touchAction = 'none';
+    container.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xdbece2);
+    scene.fog = new THREE.FogExp2(0xdbece2, 0.011);
+
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    const roomEnv = new RoomEnvironment();
+    const envRT = pmremGenerator.fromScene(roomEnv, 0.04);
+    scene.environment = envRT.texture;
+    roomEnv.dispose();
+    pmremGenerator.dispose();
+
+    // True Isometric Orthographic Camera (45 deg yaw, ~35 deg pitch)
+    const frustumBase = 17;
+    const aspect = initW / Math.max(1, initH);
+    const camera = new THREE.OrthographicCamera(
+      (-frustumBase * aspect) / 2,
+      (frustumBase * aspect) / 2,
+      frustumBase / 2,
+      -frustumBase / 2,
+      0.1,
+      140
+    );
+    const camOffset = new THREE.Vector3(24, 19.6, 24);
+    const camLookTarget = new THREE.Vector3(0, 0.5, -2);
+    camera.position.copy(camLookTarget).add(camOffset);
+    camera.lookAt(camLookTarget);
+
+    // Warm Sunlight + Cool Sky/Ground Hemisphere Rig
+    const hemiLight = new THREE.HemisphereLight(0xcbe8f6, 0x8d6e53, 0.72);
+    scene.add(hemiLight);
+
+    const sunLight = new THREE.DirectionalLight(0xfff4d6, 1.45);
+    sunLight.position.set(16, 24, 14);
+    sunLight.castShadow = !isSoftwareGl;
+    sunLight.shadow.mapSize.width = isConstrainedGpu ? 768 : 1024;
+    sunLight.shadow.mapSize.height = isConstrainedGpu ? 768 : 1024;
+    sunLight.shadow.camera.near = 2;
+    sunLight.shadow.camera.far = 70;
+    sunLight.shadow.camera.left = -22;
+    sunLight.shadow.camera.right = 22;
+    sunLight.shadow.camera.top = 22;
+    sunLight.shadow.camera.bottom = -22;
+    sunLight.shadow.bias = -0.0005;
+    sunLight.shadow.normalBias = 0.02;
+    scene.add(sunLight);
+
+    const fillLight = new THREE.DirectionalLight(0xbbe0e8, 0.38);
+    fillLight.position.set(-14, 10, -12);
+    scene.add(fillLight);
+
+    // Build Diorama Materials & World
+    const mats = createDioramaMaterials(Math.min(4, renderer.capabilities.getMaxAnisotropy()), isConstrainedGpu);
+    const island = buildFloatingIsland(mats);
+    scene.add(island);
+
+    const windowMeshes: THREE.Mesh[] = [];
+    const lanternLights: THREE.PointLight[] = [];
+    const lanternBulbs: THREE.Mesh[] = [];
+    const colliders: ColliderBox[] = [];
+    const clickableProxies: THREE.Mesh[] = [];
+
+    // 1. Hospital & Clinic Utama Asklepios (North)
+    const hospital = buildHospitalBuilding(mats, windowMeshes);
+    hospital.position.set(0, 0, -10.8);
+    scene.add(hospital);
+    colliders.push({ id: 'hospital', label: 'RS Utama Asklepios', x: 0, z: -10.8, halfW: 4.5, halfD: 2.8 });
+
+    // 2. Paviliun Herbal & Apotek Guru Lios (East beside pond)
+    const pavilion = buildApothecaryPavilion(mats, lanternLights, lanternBulbs);
+    pavilion.position.set(8.8, 0, -2.2);
+    scene.add(pavilion);
+    colliders.push({ id: 'pavilion', label: 'Apotek Guru Lios', x: 8.8, z: -2.2, halfW: 2.8, halfD: 2.5 });
+
+    // 3. Pond & Arched 3D Stone Bridge
+    const { group: pondGroup, waterMesh, boatGroup } = buildPondAndBridge(mats);
+    scene.add(pondGroup);
+
+    // 4. Market Kiosks (South)
+    const stallSpecs: [number, number, number, THREE.MeshStandardMaterial][] = [
+      [-5.8, 12.6, 0, mats.roofCoral],
+      [0, 13.0, 0, mats.plasterSage],
+      [5.8, 12.6, 0, mats.roofCream],
+    ];
+    stallSpecs.forEach(([sx, sz, ry, awn], idx) => {
+      const stall = buildMarketStall(mats, awn);
+      stall.position.set(sx, 0, sz);
+      stall.rotation.y = ry;
+      scene.add(stall);
+      colliders.push({ id: `stall-${idx}`, label: 'Kios Pasar Obat', x: sx, z: sz, halfW: 1.9, halfD: 1.1 });
+    });
+
+    // 5. Villager Cottages
+    const cottageSpecs: [string, number, number, number, THREE.MeshStandardMaterial][] = [
+      ['koko_house', -12.0, -9.8, 0.25, mats.roofTeal],
+      ['geri_house', 12.0, -9.8, -0.25, mats.roofTerracotta],
+      ['mimi_cafe', -12.2, -1.2, 0.55, mats.roofCoral],
+      ['sekar_hut', -11.5, 5.8, 0.4, mats.plasterSage],
+      ['pipi_cottage', -12.2, 11.8, 0.5, mats.roofCream],
+      ['riko_lodge', 12.2, 5.2, -0.5, mats.roofTeal],
+      ['bobi_hut', 12.0, 11.8, -0.45, mats.roofTerracotta],
+    ];
+    cottageSpecs.forEach(([cid, cx, cz, ry, rMat]) => {
+      const cottage = buildVillagerCottage(mats, rMat, windowMeshes);
+      cottage.position.set(cx, 0, cz);
+      cottage.rotation.y = ry;
+      scene.add(cottage);
+      colliders.push({ id: cid, label: cid, x: cx, z: cz, halfW: 2.1, halfD: 1.9 });
+    });
+
+    // 6. Dense botanical world: varied tree species, meadow grass, wildflowers,
+    // herb beds, facade vines, shrubs, rocks and tiny mushroom colonies.
+    const vegetation = buildVillageVegetation(isConstrainedGpu);
+    scene.add(vegetation.group);
+
+    // 7. Tap-on-ground Target Ring Marker
+    const targetRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.32, 0.48, 24),
+      new THREE.MeshBasicMaterial({ color: 0x2c6e63, side: THREE.DoubleSide, transparent: true, opacity: 0.85 })
+    );
+    targetRing.rotation.x = -Math.PI / 2;
+    targetRing.position.y = 0.06;
+    targetRing.visible = false;
+    scene.add(targetRing);
+
+    // 8. NPC 3D Chibi Rigs + Raycast Proxy Hitboxes
+    const npcRigs: Map<
+      CharacterId,
+      { station: NpcStation; rig: ChibiCharacterRig; seed: number; greetBlend: number }
+    > = new Map();
+    const proxyGeo = new THREE.CylinderGeometry(0.65, 0.65, 2.2, 10);
+    const proxyMat = new THREE.MeshBasicMaterial({ visible: false });
+
+    NPC_STATIONS.forEach((st, idx) => {
+      const isDone = st.caseId ? completedRef.current.includes(st.caseId) : false;
+      const status = st.caseId ? (isDone ? 'done' : 'quest') : null;
+      const rig = buildChibiCharacter3D(st.id, status);
+      rig.root.position.set(st.x, groundHeightAt(st.x, st.z), st.z);
+      rig.root.rotation.y = st.rotY;
+      scene.add(rig.root);
+
+      const proxy = new THREE.Mesh(proxyGeo, proxyMat);
+      proxy.position.set(st.x, 1.1, st.z);
+      proxy.userData.station = st;
+      scene.add(proxy);
+      clickableProxies.push(proxy);
+
+      npcRigs.set(st.id, {
+        station: st,
+        rig,
+        seed: idx * 1.47 + st.x * 0.31 + st.z * 0.23,
+        greetBlend: 0,
+      });
+    });
+
+    // 9. Active Player 3D Chibi Rig (swaps cleanly when selectedAvatar changes)
+    let activePlayerId = avatarRef.current;
+    let playerRig = buildChibiCharacter3D(activePlayerId, null);
+    playerRig.root.position.set(playerStateRef.current.x, 0, playerStateRef.current.z);
+    scene.add(playerRig.root);
+
+    // 10. Dynamic Multi-Layer 3D Weather Particle System & Day-Dusk-Night Lighting Rig
+    const weatherSystem = createWeatherParticleSystem(isConstrainedGpu);
+    scene.add(weatherSystem.group);
+    const lightingRig = createDayNightLightingRig();
+
+    // Pre-compile shaders once if GPU available
+    if (!isSoftwareGl) {
+      renderer.compile(scene, camera);
+    }
+
+    // Raycaster Pointer Interaction (Click villager or ground)
+    const handlePointerTap = (e: PointerEvent) => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      _mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      _mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+      _raycaster.setFromCamera(_mouse, camera);
+
+      const npcHits = _raycaster.intersectObjects(clickableProxies, false);
+      if (npcHits.length > 0) {
+        const station = npcHits[0].object.userData.station as NpcStation | undefined;
+        if (station) {
+          soundFX.playClick();
+          // Walk to point in front of NPC and auto-open dialog on arrival
+          const approachX = station.x + Math.sin(station.rotY) * 1.4;
+          const approachZ = station.z + Math.cos(station.rotY) * 1.4;
+          playerStateRef.current.autoTarget = { x: approachX, z: approachZ };
+          playerStateRef.current.autoInteractNpcId = station.id;
+          return;
+        }
+      }
+
+      if (_raycaster.ray.intersectPlane(_groundPlane, _intersectPt)) {
+        const tx = THREE.MathUtils.clamp(_intersectPt.x, -16.2, 16.2);
+        const tz = THREE.MathUtils.clamp(_intersectPt.z, -16.2, 16.2);
+        playerStateRef.current.autoTarget = { x: tx, z: tz };
+        playerStateRef.current.autoInteractNpcId = null;
+      }
+    };
+
+    renderer.domElement.addEventListener('pointerdown', handlePointerTap);
+
+    // Responsive Resize Observer
+    const syncSize = () => {
+      const w = container.clientWidth || 900;
+      const h = container.clientHeight || 520;
+      renderer.setSize(w, h);
+    };
+    const ro = new ResizeObserver(syncSize);
+    ro.observe(container);
+
+    // Animation Loop (with software-WebGL afterDraw pacing)
+    let frameId = 0;
+    let disposed = false;
+    const clock = new THREE.Clock();
+    let uiTimer = 0;
+
+    function afterDraw(cb: () => void) {
+      const gl = renderer.getContext() as WebGL2RenderingContext;
+      const sync = gl.fenceSync?.(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.flush();
+      if (!sync) {
+        frameId = window.setTimeout(cb, 80);
+        return;
+      }
+      const poll = () => {
+        if (disposed) return;
+        const state = gl.getSyncParameter(sync, gl.SYNC_STATUS);
+        if (state === gl.UNSIGNALED) {
+          frameId = window.setTimeout(poll, 5);
+        } else {
+          gl.deleteSync(sync);
+          frameId = window.setTimeout(cb, 80);
+        }
+      };
+      frameId = window.setTimeout(poll, 5);
+    }
+
+    const tick = () => {
+      if (disposed) return;
+      const dt = Math.min(clock.getDelta(), 0.05);
+      const elapsed = clock.elapsedTime;
+
+      // Swap player 3D rig if avatar changed
+      if (avatarRef.current !== activePlayerId) {
+        scene.remove(playerRig.root);
+        playerRig.root.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) {
+            obj.geometry.dispose();
+            const mat = obj.material;
+            if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+            else mat.dispose();
+          }
+        });
+        activePlayerId = avatarRef.current;
+        playerRig = buildChibiCharacter3D(activePlayerId, null);
+        scene.add(playerRig.root);
+      }
+
+      // 1. PLAYER MOVEMENT (Analog + WASD + Raycast Tap-to-Walk)
+      const ps = playerStateRef.current;
+      let screenX = joystickRef.current.dx;
+      let screenY = joystickRef.current.dy;
+
+      const keys = keysRef.current;
+      if (keys['w'] || keys['arrowup']) screenY -= 1;
+      if (keys['s'] || keys['arrowdown']) screenY += 1;
+      if (keys['a'] || keys['arrowleft']) screenX -= 1;
+      if (keys['d'] || keys['arrowright']) screenX += 1;
+
+      let worldVx = 0;
+      let worldVz = 0;
+      const inputMag = Math.hypot(screenX, screenY);
+
+      if (inputMag > 0.05) {
+        const clamped = Math.min(1, inputMag);
+        const sx = screenX / inputMag;
+        const sy = screenY / inputMag;
+        // Isometric 45 deg camera screen-to-world projection
+        const forward = -sy;
+        const right = sx;
+        worldVx = (right - forward) * 0.7071 * clamped;
+        worldVz = (-right - forward) * 0.7071 * clamped;
+      } else if (ps.autoTarget) {
+        const dx = ps.autoTarget.x - ps.x;
+        const dz = ps.autoTarget.z - ps.z;
+        const d = Math.hypot(dx, dz);
+        if (d > 0.25) {
+          worldVx = dx / d;
+          worldVz = dz / d;
+        } else {
+          const arrivedNpcId = ps.autoInteractNpcId;
+          ps.autoTarget = null;
+          ps.autoInteractNpcId = null;
+          if (arrivedNpcId) {
+            const st = NPC_STATIONS.find((n) => n.id === arrivedNpcId);
+            if (st) interactWithStation(st);
+          }
+        }
+      }
+
+      const moveMag = Math.hypot(worldVx, worldVz);
+      const isMoving = moveMag > 0.05;
+
+      if (isMoving) {
+        const nextX = THREE.MathUtils.clamp(ps.x + worldVx * ps.speed * dt, -16.4, 16.4);
+        const nextZ = THREE.MathUtils.clamp(ps.z + worldVz * ps.speed * dt, -16.4, 16.4);
+
+        const hitsObstacle = (tx: number, tz: number) => {
+          // Pond water check (allow crossing on bridge at |tx| <= 1.35)
+          if (Math.abs(tx) > 1.35 && Math.abs(tx) < 5.6 && tz > -0.7 && tz < 3.9) {
+            return true;
+          }
+          return colliders.some(
+            (c) => Math.abs(tx - c.x) < c.halfW + 0.45 && Math.abs(tz - c.z) < c.halfD + 0.45
+          );
+        };
+
+        if (!hitsObstacle(nextX, ps.z)) ps.x = nextX;
+        if (!hitsObstacle(ps.x, nextZ)) ps.z = nextZ;
+
+        const targetRot = Math.atan2(worldVx, worldVz);
+        let diff = targetRot - ps.rotY;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        ps.rotY += diff * Math.min(1, dt * 12);
+        ps.walkPhase += dt * (7 + moveMag * 5);
+      }
+
+      // Apply transform & cozy hop/idle animation to player 3D chibi
+      const groundY = groundHeightAt(ps.x, ps.z);
+      playerRig.root.position.set(ps.x, groundY, ps.z);
+      playerRig.root.rotation.y = ps.rotY;
+      if (isMoving) {
+        playerRig.bodyGroup.position.y = Math.abs(Math.sin(ps.walkPhase)) * 0.14;
+        playerRig.headGroup.rotation.x = Math.sin(ps.walkPhase * 2) * 0.05;
+        playerRig.headGroup.rotation.y = 0;
+        playerRig.leftFoot.position.z = Math.sin(ps.walkPhase) * 0.14;
+        playerRig.rightFoot.position.z = -Math.sin(ps.walkPhase) * 0.14;
+        playerRig.leftArm.rotation.x = -Math.sin(ps.walkPhase) * 0.45;
+        playerRig.rightArm.rotation.x = Math.sin(ps.walkPhase) * 0.45;
+        playerRig.leftArm.rotation.z = -0.32;
+        playerRig.rightArm.rotation.z = 0.32;
+        if (playerRig.tail) {
+          playerRig.tail.rotation.y = Math.sin(ps.walkPhase * 1.4) * 0.28;
+        }
+      } else {
+        playerRig.bodyGroup.position.y = Math.sin(elapsed * 2.4) * 0.025;
+        playerRig.headGroup.rotation.x = Math.sin(elapsed * 1.8) * 0.04;
+        playerRig.headGroup.rotation.y = Math.sin(elapsed * 0.9) * 0.12;
+        playerRig.leftFoot.position.z = 0.04;
+        playerRig.rightFoot.position.z = 0.04;
+        playerRig.leftArm.rotation.x = Math.sin(elapsed * 2.4) * 0.04;
+        playerRig.rightArm.rotation.x = -Math.sin(elapsed * 2.4) * 0.04;
+        playerRig.leftArm.rotation.z = -0.32 + Math.sin(elapsed * 2.0) * 0.03;
+        playerRig.rightArm.rotation.z = 0.32 - Math.sin(elapsed * 2.0) * 0.03;
+        if (playerRig.tail) {
+          playerRig.tail.rotation.y = Math.sin(elapsed * 4.5) * 0.18;
+        }
+      }
+
+      // Sync NPC Quest Tracking badges ('!' -> '...' -> '✓') + Lifelike Idle & Proximity Greeting Animations
+      npcRigs.forEach((entry) => {
+        const { station, rig, seed } = entry;
+        const isDone = station.caseId ? completedRef.current.includes(station.caseId) : false;
+        const isSick = Boolean(station.caseId && !isDone);
+        const isInConversation = talkingNpcIdRef.current === station.id;
+        const isApproachingToInteract = ps.autoInteractNpcId === station.id;
+        const isActiveMission = Boolean(station.caseId && activeCaseIdRef.current === station.caseId && !isDone);
+
+        if (isInConversation || isApproachingToInteract || isActiveMission) {
+          rig.updateStatusBadge('active');
+        } else if (station.caseId) {
+          rig.updateStatusBadge(isDone ? 'done' : 'quest');
+        } else {
+          rig.updateStatusBadge(null);
+        }
+
+        if (rig.statusGroup && rig.statusGroup.visible) {
+          rig.statusGroup.position.y = 1.78 + Math.sin(elapsed * 3.2 + seed) * 0.09;
+          rig.statusGroup.rotation.y = Math.PI / 4 + Math.sin(elapsed * 1.4 + seed) * 0.2;
+          if (rig.statusType === 'active' && rig.activeDots.length === 3) {
+            for (let dIdx = 0; dIdx < 3; dIdx++) {
+              rig.activeDots[dIdx].position.y = Math.max(0, Math.sin(elapsed * 6.5 - dIdx * 0.85)) * 0.055;
+            }
+          }
+        }
+
+        const dx = ps.x - station.x;
+        const dz = ps.z - station.z;
+        const distToPlayer = Math.hypot(dx, dz);
+        const isNear = distToPlayer <= 4.2;
+
+        entry.greetBlend = THREE.MathUtils.damp(entry.greetBlend, isNear ? 1 : 0, 6.5, dt);
+        const g = entry.greetBlend;
+
+        // Smoothly face player when nearby, otherwise return to resting orientation
+        const desiredRotY = isNear ? Math.atan2(dx, dz) : station.rotY;
+        let rotDiff = desiredRotY - rig.root.rotation.y;
+        while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
+        while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
+        rig.root.rotation.y += rotDiff * Math.min(1, dt * 7);
+
+        // Ambient idle motion
+        const idleBreath = Math.sin(elapsed * (isSick ? 1.8 : 2.3) + seed) * (isSick ? 0.018 : 0.03);
+        const idleSwayZ = Math.sin(elapsed * 1.25 + seed) * (isSick ? 0.035 : 0.022);
+        const idleHeadX = isSick
+          ? 0.12 + Math.sin(elapsed * 2.2 + seed) * 0.045
+          : Math.sin(elapsed * 1.7 + seed) * 0.055;
+        const idleHeadY = Math.sin(elapsed * 0.85 + seed) * (isSick ? 0.12 : 0.22);
+        const idleHeadZ = Math.sin(elapsed * 1.15 + seed) * 0.05;
+        const idleArmX = Math.sin(elapsed * 2.1 + seed) * 0.06;
+        const idleRightArmZ = 0.32 + Math.sin(elapsed * 1.9 + seed) * 0.04;
+        const idleLeftArmZ = -0.32 - Math.sin(elapsed * 1.9 + seed) * 0.04;
+
+        // Proximity greeting motion (nodding, waving, happy bounce)
+        const waveSpeed = isSick ? 5.6 : 9.2;
+        const greetRightArmZ = isSick
+          ? 1.72 + Math.sin(elapsed * waveSpeed + seed) * 0.24
+          : 2.28 + Math.sin(elapsed * waveSpeed + seed) * 0.38;
+        const greetRightArmX = -0.24;
+        const greetHeadX = isSick
+          ? 0.05 + Math.sin(elapsed * 4.5 + seed) * 0.11
+          : Math.sin(elapsed * 6.0 + seed) * 0.15;
+        const greetHop = isSick
+          ? Math.abs(Math.sin(elapsed * 3.0 + seed)) * 0.025
+          : Math.abs(Math.sin(elapsed * 4.6 + seed)) * 0.065;
+
+        // Blend Idle <-> Greeting cleanly without allocations
+        rig.bodyGroup.position.y = THREE.MathUtils.lerp(idleBreath, greetHop, g);
+        rig.bodyGroup.rotation.z = THREE.MathUtils.lerp(idleSwayZ, Math.sin(elapsed * 4 + seed) * 0.03, g);
+
+        rig.headGroup.rotation.x = THREE.MathUtils.lerp(idleHeadX, greetHeadX, g);
+        rig.headGroup.rotation.y = THREE.MathUtils.lerp(idleHeadY, Math.sin(elapsed * 2.2 + seed) * 0.06, g);
+        rig.headGroup.rotation.z = THREE.MathUtils.lerp(idleHeadZ, Math.sin(elapsed * 3.1 + seed) * 0.07, g);
+
+        rig.leftArm.rotation.x = THREE.MathUtils.lerp(idleArmX, 0.1, g);
+        rig.leftArm.rotation.z = THREE.MathUtils.lerp(idleLeftArmZ, -0.38, g);
+
+        rig.rightArm.rotation.x = THREE.MathUtils.lerp(-idleArmX, greetRightArmX, g);
+        rig.rightArm.rotation.z = THREE.MathUtils.lerp(idleRightArmZ, greetRightArmZ, g);
+
+        if (rig.tail) {
+          const tailSpeed = THREE.MathUtils.lerp(3.2, 9.5, g);
+          const tailAmp = THREE.MathUtils.lerp(0.14, 0.34, g);
+          rig.tail.rotation.y = Math.sin(elapsed * tailSpeed + seed) * tailAmp;
+        }
+      });
+
+      // Ground target ring visibility
+      if (ps.autoTarget) {
+        targetRing.visible = true;
+        targetRing.position.set(ps.autoTarget.x, groundHeightAt(ps.autoTarget.x, ps.autoTarget.z) + 0.05, ps.autoTarget.z);
+        const s = 1 + Math.sin(elapsed * 8) * 0.12;
+        targetRing.scale.set(s, s, 1);
+      } else {
+        targetRing.visible = false;
+      }
+
+      // 2. SMOOTH ISOMETRIC CAMERA TRACKING & ZOOM
+      const curW = container.clientWidth || 900;
+      const curH = container.clientHeight || 520;
+      const curAspect = curW / Math.max(1, curH);
+      const frustumH = frustumBase / zoomRef.current;
+      camera.left = (-frustumH * curAspect) / 2;
+      camera.right = (frustumH * curAspect) / 2;
+      camera.top = frustumH / 2;
+      camera.bottom = -frustumH / 2;
+      camera.updateProjectionMatrix();
+
+      camLookTarget.x = THREE.MathUtils.damp(camLookTarget.x, ps.x * 0.72, 6, dt);
+      camLookTarget.z = THREE.MathUtils.damp(camLookTarget.z, ps.z * 0.72, 6, dt);
+      camera.position.copy(camLookTarget).add(camOffset);
+      camera.lookAt(camLookTarget);
+
+      // 3. WATER, BOAT & TREE SWAY
+      boatGroup.position.y = 0.16 + Math.sin(elapsed * 1.8) * 0.035;
+      boatGroup.rotation.z = Math.sin(elapsed * 1.5) * 0.04;
+      waterMesh.position.y = 0.035 + Math.sin(elapsed * 2.1) * 0.012;
+
+      const curWeather = weatherRef.current;
+      const swayAmp = curWeather === WeatherType.ANGIN_PANCAROBA ? 2.2 : 0.8;
+      vegetation.update(elapsed, swayAmp);
+
+      // 4. CONTINUOUS DAY -> DUSK -> NIGHT LIGHTING TRANSITION & DYNAMIC 3D PARTICLES
+      const stepPhaseCircular = (cur: number, tgt: number, alpha: number) => {
+        const diff = (((tgt - cur) % 1) + 1.5) % 1 - 0.5;
+        return (((cur + diff * alpha) % 1) + 1) % 1;
+      };
+
+      if (targetPhaseRef.current !== null) {
+        const diff = (((targetPhaseRef.current - dayPhaseRef.current) % 1) + 1.5) % 1 - 0.5;
+        if (Math.abs(diff) < 0.005) {
+          dayPhaseRef.current = targetPhaseRef.current;
+          targetPhaseRef.current = null;
+        } else {
+          dayPhaseRef.current = stepPhaseCircular(dayPhaseRef.current, targetPhaseRef.current, Math.min(1, dt * 2.8));
+        }
+      } else {
+        // Real-time continuous progression (~96s full Pagi -> Siang -> Senja -> Malam -> Pagi cycle)
+        dayPhaseRef.current = (dayPhaseRef.current + dt / 96) % 1;
+      }
+
+      const isNightWeather = curWeather === WeatherType.KABUT_MALAM;
+      nightLockBlendRef.current = THREE.MathUtils.damp(
+        nightLockBlendRef.current,
+        isNightWeather ? 1 : 0,
+        2.2,
+        dt
+      );
+      const effectivePhase = stepPhaseCircular(dayPhaseRef.current, 0.82, nightLockBlendRef.current);
+
+      lightingRig.update(
+        effectivePhase,
+        curWeather,
+        scene,
+        sunLight,
+        hemiLight,
+        fillLight,
+        windowMeshes,
+        mats.glassWindowLit,
+        mats.glassWindow,
+        lanternLights,
+        lanternBulbs
+      );
+
+      // Animate multi-layer weather particle system according to active scenario weather
+      weatherSystem.update(curWeather, dt, elapsed);
+
+      // 5. UPDATE MINI-MAP & NEARBY NPC HUD (~8 Hz)
+      uiTimer += dt;
+      if (uiTimer >= 0.12) {
+        uiTimer = 0;
+
+        const nextPhaseLabel = getTimePhaseLabel(effectivePhase);
+        setTimePhaseLabel((prev) => (prev === nextPhaseLabel ? prev : nextPhaseLabel));
+
+        let closest: NpcStation | null = null;
+        let minDist = 2.6;
+        for (const st of NPC_STATIONS) {
+          const d = Math.hypot(st.x - ps.x, st.z - ps.z);
+          if (d < minDist) {
+            minDist = d;
+            closest = st;
+          }
+        }
+        setNearbyNpc((prev) => (prev?.id === closest?.id ? prev : closest));
+
+        // Update spatial water stream proximity ("gemericik air" near pond & stone bridge)
+        const dxPond = Math.max(0, Math.abs(ps.x) - 5.5);
+        const dzPond = Math.max(0, Math.abs(ps.z - 1.6) - 2.4);
+        const pondDist = Math.hypot(dxPond, dzPond);
+        const waterProximity = Math.max(0, Math.min(1, 1 - pondDist / 10.5));
+        villageAmbientAudio.setWaterProximity(waterProximity);
+
+        const mini = minimapRef.current;
+        if (mini) {
+          const mctx = mini.getContext('2d');
+          if (mctx) {
+            const mw = mini.width;
+            const mh = mini.height;
+            mctx.fillStyle = '#16302B';
+            mctx.fillRect(0, 0, mw, mh);
+
+            const toMiniX = (wx: number) => ((wx + 18) / 36) * mw;
+            const toMiniY = (wz: number) => ((wz + 18) / 36) * mh;
+
+            // Pond
+            mctx.fillStyle = '#38BDF8';
+            mctx.globalAlpha = 0.45;
+            mctx.fillRect(toMiniX(-5.7), toMiniY(-1.0), (11.4 / 36) * mw, (5.2 / 36) * mh);
+            mctx.globalAlpha = 1;
+
+            // Hospital & buildings
+            colliders.forEach((c) => {
+              mctx.fillStyle = c.id === 'hospital' ? '#FAF9F5' : '#84A98C';
+              mctx.fillRect(
+                toMiniX(c.x - c.halfW),
+                toMiniY(c.z - c.halfD),
+                ((c.halfW * 2) / 36) * mw,
+                ((c.halfD * 2) / 36) * mh
+              );
+            });
+
+            // Patient markers
+            NPC_STATIONS.forEach((st) => {
+              if (!st.caseId) return;
+              const done = completedRef.current.includes(st.caseId);
+              mctx.fillStyle = done ? '#3B826E' : '#F59E0B';
+              mctx.beginPath();
+              mctx.arc(toMiniX(st.x), toMiniY(st.z), 3.2, 0, Math.PI * 2);
+              mctx.fill();
+            });
+
+            // Player dot
+            mctx.fillStyle = '#38BDF8';
+            mctx.beginPath();
+            mctx.arc(toMiniX(ps.x), toMiniY(ps.z), 4.2, 0, Math.PI * 2);
+            mctx.fill();
+            mctx.strokeStyle = '#FFFFFF';
+            mctx.lineWidth = 1.5;
+            mctx.stroke();
+          }
+        }
+      }
+
+      renderer.render(scene, camera);
+
+      if (isSoftwareGl) {
+        afterDraw(tick);
+      } else {
+        frameId = requestAnimationFrame(tick);
+      }
+    };
+
+    if (isSoftwareGl) {
+      frameId = window.setTimeout(tick, 0);
+    } else {
+      frameId = requestAnimationFrame(tick);
+    }
+
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(frameId);
+      clearTimeout(frameId);
+      ro.disconnect();
+      renderer.domElement.removeEventListener('pointerdown', handlePointerTap);
+      scene.traverse((obj) => {
+        if (obj instanceof THREE.Mesh || obj instanceof THREE.Points) {
+          obj.geometry?.dispose();
+          const mat = obj.material;
+          if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+          else mat?.dispose();
+        }
+      });
+      mats.disposeAll();
+      vegetation.dispose();
+      weatherSystem.dispose();
+      proxyGeo.dispose();
+      proxyMat.dispose();
+      envRT.dispose();
+      renderer.dispose();
+      if (renderer.domElement.parentNode === container) {
+        container.removeChild(renderer.domElement);
+      }
+    };
+  }, []);
+
+  const currentWeather = WEATHER_INFO[weather];
+  const playerAvatarProfile = AVATARS.find((a) => a.id === selectedAvatar) || AVATARS[0];
+
+  return (
+    <div className="space-y-5">
+      {/* Weather Epidemiological Control Strip */}
+      <div className="bg-white border border-[#2C6E63]/15 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <div className="text-xs font-medium text-[#2C6E63] mb-1">
+            Cuaca & Epidemiologi Diorama 3D Desa Asklepios
+          </div>
+          <div className="font-display font-bold text-base text-[#16302B]">
+            {currentWeather.label} — {currentWeather.epidemiologyNote}
+          </div>
+          <p className="text-xs sm:text-sm text-[#16302B]/75 mt-0.5">
+            {currentWeather.clinicalEffect}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5 bg-[#E8EFEA] p-1.5 rounded-xl shrink-0">
+          {(Object.keys(WEATHER_INFO) as WeatherType[]).map((wKey) => {
+            const active = weather === wKey;
+            return (
+              <button
+                key={wKey}
+                type="button"
+                onClick={() => {
+                  soundFX.playClick();
+                  onChangeWeather(wKey);
+                }}
+                className={`min-h-[44px] px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                  active
+                    ? 'bg-[#2C6E63] text-white shadow-sm'
+                    : 'text-[#16302B] hover:bg-white/70'
+                }`}
+              >
+                {WEATHER_ICONS[wKey]}
+                <span>{WEATHER_INFO[wKey].label.split(' ')[0]}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* True 3D Isometric Diorama WebGL Viewport */}
+      <div className="relative rounded-2xl overflow-hidden border border-[#2C6E63]/25 bg-[#DBECE2] shadow-md select-none h-[410px] sm:h-[490px] md:h-[550px]">
+        {/* Isolated empty WebGL mount container */}
+        <div ref={mountRef} className="w-full h-full cursor-pointer" />
+
+        {/* Top-Left Minimal Player Guidance HUD (no backdrop-filter over WebGL) */}
+        <div className="pointer-events-none absolute top-3 left-3 bg-[#16302B]/85 text-[#FAF9F5] px-3.5 py-2 rounded-xl border border-[#FAF9F5]/20 text-xs max-w-[60%]">
+          <div className="font-display font-bold">
+            {playerAvatarProfile.name} · {timePhaseLabel}
+          </div>
+          <div className="text-[11px] text-[#E8EFEA]/90">
+            Analog / WASD untuk bergerak · Klik langsung warga 3D (!) atau tanah untuk berjalan otomatis
+          </div>
+        </div>
+
+        {/* Top-Right Compact Live Mini-Map + Time Cycle + Audio + Zoom Buttons */}
+        <div className="absolute top-3 right-3 flex flex-col items-end gap-2">
+          <div className="pointer-events-none rounded-xl overflow-hidden border-2 border-[#FAF9F5]/60 shadow-lg bg-[#16302B]">
+            <canvas ref={minimapRef} width={132} height={132} className="block w-[96px] sm:w-[118px] h-auto" />
+            <div className="px-2 py-0.5 bg-[#16302B]/95 text-[10px] font-mono text-[#E8EFEA] flex items-center justify-between">
+              <span>Pulau 3D</span>
+              <span className="tabular-nums">{completedCases.length}/7</span>
+            </div>
+          </div>
+
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                soundFX.playClick();
+                const cur = dayPhaseRef.current;
+                const stops = [0.08, 0.28, 0.56, 0.82];
+                const nextStop = stops.find((s) => s > cur + 0.06) ?? stops[0];
+                targetPhaseRef.current = nextStop;
+              }}
+              className="min-h-[40px] min-w-[40px] rounded-xl bg-[#FAF9F5] hover:bg-[#E8EFEA] text-[#16302B] border border-[#2C6E63]/25 shadow flex items-center justify-center transition-colors"
+              title="Lanjutkan transisi waktu (Pagi / Siang / Senja / Malam)"
+              aria-label="Lanjutkan transisi waktu desa"
+            >
+              <Clock className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                soundFX.playClick();
+                const next = !ambientMuted;
+                setAmbientMuted(next);
+                villageAmbientAudio.setLocalMuted(next);
+                if (!next) villageAmbientAudio.start(weatherRef.current);
+              }}
+              className={`min-h-[40px] min-w-[40px] rounded-xl border shadow flex items-center justify-center transition-colors ${
+                ambientMuted
+                  ? 'bg-[#FAF9F5] text-[#DC2626] border-[#DC2626]/30 hover:bg-[#FEE2E2]/40'
+                  : 'bg-[#FAF9F5] text-[#2C6E63] border-[#2C6E63]/25 hover:bg-[#E8EFEA]'
+              }`}
+              title={ambientMuted ? 'Aktifkan suara alam desa' : 'Bisukan suara alam desa'}
+              aria-label={ambientMuted ? 'Aktifkan suara alam desa' : 'Bisukan suara alam desa'}
+            >
+              {ambientMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                soundFX.playClick();
+                zoomRef.current = Math.min(1.45, zoomRef.current + 0.15);
+              }}
+              className="min-h-[40px] min-w-[40px] rounded-xl bg-[#FAF9F5] hover:bg-[#E8EFEA] text-[#16302B] border border-[#2C6E63]/25 shadow flex items-center justify-center"
+              aria-label="Perbesar kamera diorama"
+            >
+              <ZoomIn className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                soundFX.playClick();
+                zoomRef.current = Math.max(0.7, zoomRef.current - 0.15);
+              }}
+              className="min-h-[40px] min-w-[40px] rounded-xl bg-[#FAF9F5] hover:bg-[#E8EFEA] text-[#16302B] border border-[#2C6E63]/25 shadow flex items-center justify-center"
+              aria-label="Perkecil kamera diorama"
+            >
+              <ZoomOut className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Bottom-Left Virtual Analog Joystick */}
+        <div className="absolute bottom-4 left-4 z-20">
+          <VirtualJoystick onVectorChange={handleJoystickVector} size={116} />
+        </div>
+
+        {/* Bottom-Right Context Action Button when near 3D Villager or Mentor */}
+        {nearbyNpc && (
+          <div className="absolute bottom-5 right-4 z-20">
+            <button
+              type="button"
+              onClick={() => interactWithStation(nearbyNpc)}
+              className="min-h-[48px] px-5 py-3 rounded-2xl bg-[#2C6E63] hover:bg-[#235950] text-white font-display font-bold text-sm shadow-xl border-2 border-[#FAF9F5]/80 inline-flex items-center gap-2 transition-transform active:scale-95 whitespace-nowrap"
+            >
+              {nearbyNpc.caseId ? (
+                <>
+                  <Stethoscope className="w-4 h-4" />
+                  <span>Periksa {CHARACTERS[nearbyNpc.id].name}</span>
+                </>
+              ) : (
+                <>
+                  <MessageCircle className="w-4 h-4" />
+                  <span>Bicara dengan {CHARACTERS[nearbyNpc.id].name}</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* Mentor Speech Bubble Overlay when talking in 3D Village */}
+        {mentorBubble && (
+          <div className="absolute bottom-4 left-36 right-4 sm:left-40 sm:max-w-lg bg-[#FAF9F5] border border-[#2C6E63]/30 rounded-2xl p-3.5 shadow-2xl flex items-start gap-3 z-30">
+            <CharacterPortrait characterId={mentorBubble.id} emotion={EmotionType.HAPPY} size={52} />
+            <p className="text-xs sm:text-sm text-[#16302B] leading-relaxed flex-1">
+              {mentorBubble.text}
+            </p>
+            <button
+              type="button"
+              onClick={() => setMentorBubble(null)}
+              className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-lg hover:bg-[#E8EFEA] text-[#16302B]"
+              aria-label="Tutup pesan"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Patient Roster Cards Below */}
+      <div>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <h3 className="font-display font-bold text-lg text-[#16302B]">
+            Daftar Pasien & Kios Desa ({completedCases.length}/{CASES.length} Selesai)
+          </h3>
+          <span className="text-xs text-[#2C6E63]">
+            Klik warga di diorama 3D atau pilih kartu kasus di bawah
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
+          {CASES.map((c) => {
+            const patient = CHARACTERS[c.patientId];
+            const isDone = completedCases.includes(c.id);
+            const isActiveMission = !isDone && activeCaseId === c.id;
+            const matchesWeather = c.recommendedWeather === weather;
+
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => {
+                  soundFX.playClick();
+                  onSelectCase(c);
+                }}
+                className={`text-left bg-white hover:bg-[#FAF9F5] border rounded-2xl p-4 transition-all flex flex-col justify-between gap-3 min-h-[44px] ${
+                  isActiveMission
+                    ? 'border-[#D97706] ring-1 ring-[#D97706]/30'
+                    : 'border-[#2C6E63]/15 hover:border-[#2C6E63]/45'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 text-xs text-[#2C6E63] mb-1.5">
+                    <span>
+                      {patient.name} ({patient.species}) · {c.difficulty}
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-1 font-semibold ${
+                        isDone ? 'text-[#3B826E]' : isActiveMission ? 'text-[#D97706]' : 'text-[#D97706]'
+                      }`}
+                    >
+                      {isDone && <CheckCircle2 className="w-3.5 h-3.5" />}
+                      {isDone
+                        ? 'Selesai'
+                        : isActiveMission
+                          ? 'Misi Aktif (...)'
+                          : matchesWeather
+                            ? 'Prioritas Cuaca'
+                            : 'Menunggu Triase'}
+                    </span>
+                  </div>
+                  <h4 className="font-display font-bold text-base text-[#16302B] leading-snug">
+                    {c.title}
+                  </h4>
+                  <p className="text-xs text-[#16302B]/75 mt-1.5 leading-relaxed line-clamp-2">
+                    {c.summary}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-[#2C6E63]/10 text-xs font-medium text-[#2C6E63]">
+                  <span>{c.diagnosis}</span>
+                  <span className="font-mono tabular-nums">+{c.xpReward} XP</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};

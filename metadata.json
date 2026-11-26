@@ -1,0 +1,8 @@
+{
+  "name": "Klinik Desa Asklepios: Petualangan Apoteker Muda",
+  "description": "Aplikasi web edukasi farmasi klinis dan RPG simulasi interaktif dengan arena pertahanan terapi, kalkulator farmasi terpadu, buku saku formularium, dan evaluasi klinis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

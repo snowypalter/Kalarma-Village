@@ -1,0 +1,88 @@
+import { QuizQuestion } from '../types/pharmacy';
+
+export const QUIZ_QUESTIONS: QuizQuestion[] = [
+  {
+    id: 'q1',
+    topic: 'Penggunaan Antibiotik Rasional',
+    stem: 'Nenek Pipi (64 tahun) datang mengeluhkan nyeri tenggorokan sejak 2 hari, suara serak, hidung berair bening, suhu 37,3°C tanpa eksudat tonsil. Ia meminta antibiotik Amoksisilin agar cepat sembuh. Apa tindakan apoteker yang paling tepat?',
+    options: [
+      { id: 'a', text: 'Memberikan Amoksisilin 500 mg 3x1 selama 3 hari saja sebagai pencegahan' },
+      { id: 'b', text: 'Menolak pemberian antibiotik, mengedukasi bahwa gejala mengarah ke infeksi virus, dan merekomendasikan terapi suportif + istirahat' },
+      { id: 'c', text: 'Mengganti dengan Siprofloksasin karena spektrumnya lebih luas' },
+      { id: 'd', text: 'Memberikan Azitromisin dosis tunggal tanpa pemeriksaan lanjut' },
+    ],
+    correctOptionId: 'b',
+    mentorSpeaker: 'alia',
+    explanation: 'Gejala pilek berair, suara serak, demam ringan tanpa eksudat tonsil merupakan ciri khas faringitis viral. Antibiotik tidak efektif melawan virus dan penggunaan yang tidak perlu memicu resistensi antimikroba.',
+  },
+  {
+    id: 'q2',
+    topic: 'Interaksi Obat & Absorpsi',
+    stem: 'Bobi mendapat resep Siprofloksasin 500 mg 2x1 untuk ISK. Di rumah, ia rutin meminum suspensi Antasida (Al/Mg) setiap terasa perih di lambung. Bagaimana saran pemberian yang benar?',
+    options: [
+      { id: 'a', text: 'Minum Siprofloksasin dan Antasida bersamaan agar lambung tidak perih' },
+      { id: 'b', text: 'Hentikan Siprofloksasin dan ganti seluruhnya dengan Antasida' },
+      { id: 'c', text: 'Beri jeda minimal 2 jam sebelum atau 4–6 jam sesudah Antasida untuk mencegah reaksi khelasi' },
+      { id: 'd', text: 'Minum Siprofloksasin bersama segelas susu tinggi kalsium' },
+    ],
+    correctOptionId: 'c',
+    mentorSpeaker: 'lios',
+    explanation: 'Ion logam Al3+ dan Mg2+ pada antasida (serta Ca2+ pada susu) membentuk kompleks kelat tidak larut dengan fluorokuinolon sehingga kadar antibiotik di darah turun drastis dan berisiko gagal terapi.',
+  },
+  {
+    id: 'q3',
+    topic: 'Resistensi Antimikroba',
+    stem: 'Pada hari ke-3 minum Amoksisilin-Klavulanat untuk ISPA bakterial, demam Koko sudah turun dan batuk membaik. Ia berencana menghentikan obat karena merasa sudah sembuh. Apa risiko klinis terbesar jika terapi dihentikan dini?',
+    options: [
+      { id: 'a', text: 'Populasi bakteri tersisa yang lebih toleran bertahan hidup dan berpotensi bermutasi menjadi resisten' },
+      { id: 'b', text: 'Obat berubah menjadi toksik bagi ginjal saat disimpan' },
+      { id: 'c', text: 'Antibiotik langsung berubah menjadi virus saluran napas' },
+      { id: 'd', text: 'Tidak ada risiko karena hilangnya demam berarti seluruh bakteri telah musnah' },
+    ],
+    correctOptionId: 'a',
+    mentorSpeaker: 'lios',
+    explanation: 'Hilangnya demam menandakan jumlah bakteri berkurang, bukan habis total. Menghentikan antibiotik sebelum durasi tuntas memberi peluang bakteri paling tangguh bertahan dan mengembangkan resistensi.',
+  },
+  {
+    id: 'q4',
+    topic: 'Farmakoterapi Hipertensi',
+    stem: 'Tuan Geri rutin mengonsumsi Kaptopril 25 mg 2x1 untuk hipertensi. Tekanan darahnya terkontrol, namun ia mengeluhkan batuk kering gatal terus-menerus selama 3 minggu tanpa infeksi. Penggantian terapi rasional yang disarankan ke Dr. Bima adalah:',
+    options: [
+      { id: 'a', text: 'Menambahkan antibiotik Azitromisin untuk batuknya' },
+      { id: 'b', text: 'Mengganti ACE inhibitor (Kaptopril) dengan golongan ARB seperti Valsartan' },
+      { id: 'c', text: 'Menghentikan seluruh obat hipertensi secara mendadak' },
+      { id: 'd', text: 'Menaikkan dosis Kaptopril menjadi 3x1' },
+    ],
+    correctOptionId: 'b',
+    mentorSpeaker: 'alia',
+    explanation: 'Batuk kering adalah efek samping khas ACE inhibitor akibat penumpukan bradikinin. Golongan ARB memblokir reseptor AT1 secara selektif tanpa menghambat pemecahan bradikinin sehingga batuk teratasi.',
+  },
+  {
+    id: 'q5',
+    topic: 'Kalkulasi Laju Infus Klinis',
+    stem: 'Riko membutuhkan infus Vankomisin 500 mL yang harus habis dalam 4 jam (240 menit) menggunakan selang infus makro (faktor tetes 20 tetes/mL) agar terhindar dari Red Man Syndrome. Berapakah kecepatan tetesan infus yang tepat?',
+    options: [
+      { id: 'a', text: '21 tetes/menit' },
+      { id: 'b', text: '42 tetes/menit' },
+      { id: 'c', text: '83 tetes/menit' },
+      { id: 'd', text: '125 tetes/menit' },
+    ],
+    correctOptionId: 'b',
+    mentorSpeaker: 'hana',
+    explanation: 'Rumus TPM = (Volume mL × Faktor Tetes) / (Jam × 60). Maka (500 × 20) / (4 × 60) = 10.000 / 240 = 41,67 ≈ 42 tetes/menit.',
+  },
+  {
+    id: 'q6',
+    topic: 'Tata Laksana GERD & Diabetes',
+    stem: 'Manakah pernyataan konseling cara minum obat yang PALING TEPAT untuk pasien GERD (Omeprazol) dan pasien DM Tipe 2 (Metformin)?',
+    options: [
+      { id: 'a', text: 'Omeprazol diminum sebelum makan pagi (30–60 menit ac); Metformin diminum bersama atau segera sesudah makan' },
+      { id: 'b', text: 'Omeprazol diminum sesudah makan malam; Metformin diminum saat perut kosong sebelum tidur' },
+      { id: 'c', text: 'Kapsul Omeprazol dibuka dan dilarutkan ke air hangat sebelum diminum' },
+      { id: 'd', text: 'Metformin boleh diminum ganda jika lupa satu dosis kemarin' },
+    ],
+    correctOptionId: 'a',
+    mentorSpeaker: 'alia',
+    explanation: 'PPI seperti Omeprazol bekerja optimal bila diminum 30–60 menit sebelum sarapan saat pompa proton aktif, dan kapsul salut enteriknya tidak boleh dibuka. Metformin diminum bersama/sesudah makan untuk menekan efek samping mual/diare.',
+  },
+];
