@@ -4,79 +4,70 @@ import {
   Award,
   BookOpen,
   Calculator,
-  Check,
-  CheckCircle2,
   ClipboardCheck,
   Clock,
   CloudSun,
   Compass,
+  Droplets,
+  Fish,
   GraduationCap,
+  Hammer,
+  HeartHandshake,
   Home,
-  Lightbulb,
-  Lock,
-  Settings,
   ShieldCheck,
+  Shirt,
   Sparkles,
+  Sprout,
   Star,
+  Stethoscope,
+  Store,
   Trophy,
   Users,
   Volume2,
   VolumeX,
   X,
 } from 'lucide-react';
-import { CalculatorSuite } from './components/CalculatorSuite';
-import { CharacterPortrait } from './components/CharacterPortrait';
-import { ClinicalQuiz } from './components/ClinicalQuiz';
 import { ClinicalScreening } from './components/ClinicalScreening';
-import { FormularyBook } from './components/FormularyBook';
 import { GameHUD, HudActionPage } from './components/GameHUD';
 import { LearningModeModal } from './components/LearningModeModal';
 import { TherapyDefenseCanvas } from './components/TherapyDefenseCanvas';
 import { TitleScreen } from './components/TitleScreen';
-import { VillageDiorama3D } from './components/VillageDiorama3D';
+import { VillageDiorama3D, VisitableBuildingId } from './components/VillageDiorama3D';
+import { RpgTabId, VillageRpgShell } from './components/VillageRpgShell';
 import { VisualNovelDialog } from './components/VisualNovelDialog';
 import { CASES } from './data/cases';
 import { AVATARS, CHARACTERS, VILLAGE_KEY_ART, WEATHER_INFO, getRankForXp } from './data/characters';
 import { FORMULARY_DATA } from './data/formulary';
 import {
+  BUILDING_UPGRADES,
+  DAILY_QUESTS,
+  FishingSpeciesEntry,
+  HerbalEncyclopediaEntry,
+  UpgradableBuildingId,
+  getClinicUpgradeBonus,
+  getGardenUpgradeBonus,
+  getPondUpgradeBonus,
+} from './data/villageRpgData';
+import {
   AvatarId,
   CaseScenario,
   CaseStage,
-  CharacterId,
-  EmotionType,
   WeatherType,
 } from './types/pharmacy';
+import {
+  CaughtFishRecord,
+  DEFAULT_BUILDING_LEVELS,
+  DEFAULT_INVENTORY,
+  DEFAULT_SAVE_DATA,
+  DailyQuestProgress,
+  GraphicsQuality,
+  createDefaultDailyQuest,
+  getLocalDateKey,
+  hasSavedAdventure,
+  loadGameSave,
+  persistGameSave,
+} from './utils/saveSystem';
 import { soundFX } from './utils/sound';
-
-const NPC_LIST: CharacterId[] = [
-  'lios',
-  'alia',
-  'bima',
-  'sekar',
-  'hana',
-  'yuna',
-  'koko',
-  'bobi',
-  'geri',
-  'mimi',
-  'nino',
-  'riko',
-  'pipi',
-  'lili',
-  'cici',
-  'taro',
-  'dodo',
-  'sora',
-];
-
-const ALL_EMOTIONS: { id: EmotionType; label: string }[] = [
-  { id: EmotionType.HAPPY, label: 'Senang' },
-  { id: EmotionType.THINKING, label: 'Berpikir' },
-  { id: EmotionType.PANICKED, label: 'Panik' },
-  { id: EmotionType.SICK, label: 'Lemas' },
-  { id: EmotionType.PROUD, label: 'Bangga' },
-  { id: EmotionType.SERIOUS, label: 'Serius' },
-];
 
 const WEATHER_ORDER: WeatherType[] = [
   WeatherType.CERAH_HANGAT,
@@ -84,15 +75,6 @@ const WEATHER_ORDER: WeatherType[] = [
   WeatherType.ANGIN_PANCAROBA,
   WeatherType.KABUT_MALAM,
 ];
-
-type InGameOverlay =
-  | 'quest'
-  | 'medals'
-  | 'formulary'
-  | 'calculator'
-  | 'quiz'
-  | 'character'
-  | 'settings';
 
 interface PharmacistMedal {
   id: 'bronze' | 'silver' | 'gold' | 'emerald';
@@ -113,7 +95,7 @@ const PHARMACIST_MEDALS: PharmacistMedal[] = [
     tier: 'Perunggu',
     title: 'Inisiat Apotek',
     requiredCases: 1,
-    description: 'Menuntaskan 1 kasus klinis perdana di Desa Asklepios.',
+    description: 'Menuntaskan 1 kasus klinis perdana di Klinik Desa Asklepios, Kalarma Village.',
     ringColor: '#B45309',
     fillColor: '#FFD166',
     ribbonColor: '#FF5A5F',
@@ -277,13 +259,55 @@ const MedalEmblem: React.FC<{
 };
 
 export default function App() {
+  const [initialSave] = useState(() => loadGameSave());
   const [showTitle, setShowTitle] = useState(true);
+  const [hasStarted, setHasStarted] = useState(initialSave.hasStarted);
   const [showLearnModal, setShowLearnModal] = useState(false);
-  const [selectedAvatar, setSelectedAvatar] = useState<AvatarId>(AvatarId.SALI);
-  const [weather, setWeather] = useState<WeatherType>(WeatherType.CERAH_HANGAT);
-  const [xp, setXp] = useState(0);
-  const [completedCases, setCompletedCases] = useState<string[]>([]);
-  const [isMuted, setIsMuted] = useState(false);
+  const [selectedAvatar, setSelectedAvatar] = useState<AvatarId>(initialSave.selectedAvatar);
+  const [weather, setWeather] = useState<WeatherType>(initialSave.weather);
+  const [xp, setXp] = useState(initialSave.xp);
+  const [coins, setCoins] = useState(initialSave.coins);
+  const [completedCases, setCompletedCases] = useState<string[]>(initialSave.completedCases);
+  const [isMuted, setIsMuted] = useState(() => {
+    soundFX.setMuted(initialSave.isMuted);
+    return initialSave.isMuted;
+  });
+  const [graphicsQuality, setGraphicsQuality] = useState<GraphicsQuality>(
+    initialSave.graphicsQuality
+  );
+  const [equippedOutfitId, setEquippedOutfitId] = useState<string | null>(
+    initialSave.equippedOutfitId
+  );
+  const [unlockedOutfitIds, setUnlockedOutfitIds] = useState<string[]>(
+    initialSave.unlockedOutfitIds
+  );
+  const [equippedSkinId, setEquippedSkinId] = useState<string | null>(
+    initialSave.equippedSkinId
+  );
+  const [unlockedSkinIds, setUnlockedSkinIds] = useState<string[]>(
+    initialSave.unlockedSkinIds
+  );
+  const [equippedAccessoryId, setEquippedAccessoryId] = useState<string | null>(
+    initialSave.equippedAccessoryId
+  );
+  const [unlockedAccessoryIds, setUnlockedAccessoryIds] = useState<string[]>(
+    initialSave.unlockedAccessoryIds
+  );
+  const [inventory, setInventory] = useState<Record<string, number>>(initialSave.inventory);
+  const [discoveredHerbs, setDiscoveredHerbs] = useState<string[]>(initialSave.discoveredHerbs);
+  const [caughtFish, setCaughtFish] = useState<Record<string, CaughtFishRecord>>(
+    initialSave.caughtFish
+  );
+  const [buildingLevels, setBuildingLevels] = useState<Record<string, number>>(
+    initialSave.buildingLevels
+  );
+  const [unlockedExpansions, setUnlockedExpansions] = useState<string[]>(
+    initialSave.unlockedExpansions
+  );
+  const [claimedAchievements, setClaimedAchievements] = useState<string[]>(
+    initialSave.claimedAchievements
+  );
+  const [dailyQuest, setDailyQuest] = useState<DailyQuestProgress>(initialSave.dailyQuest);
 
   // Case RPG State Machine
   const [caseStage, setCaseStage] = useState<CaseStage>(CaseStage.VILLAGE_HUB);
@@ -291,28 +315,33 @@ export default function App() {
   const [lastStars, setLastStars] = useState<number>(3);
   const [counselingDone, setCounselingDone] = useState(false);
   const [newlyUnlockedMedal, setNewlyUnlockedMedal] = useState<PharmacistMedal | null>(null);
-  const [dashboardCelebrateMedalId, setDashboardCelebrateMedalId] = useState<
-    PharmacistMedal['id'] | null
-  >(null);
 
   // HUD 3D Controls & Unified In-Game Overlays
-  const [activeOverlay, setActiveOverlay] = useState<InGameOverlay | null>(null);
+  const [activeOverlay, setActiveOverlay] = useState<RpgTabId | null>(null);
+  const [activeBuildingModal, setActiveBuildingModal] = useState<VisitableBuildingId | null>(null);
   const [timeStepTrigger, setTimeStepTrigger] = useState(0);
   const [zoomTrigger, setZoomTrigger] = useState<{ dir: 1 | -1; seq: number }>({ dir: 1, seq: 0 });
   const [focusHubTrigger, setFocusHubTrigger] = useState(0);
+  const [navigateToBuilding, setNavigateToBuilding] = useState<{
+    buildingId: VisitableBuildingId;
+    seq: number;
+  } | null>(null);
   const [formularyFocusId, setFormularyFocusId] = useState<string | null>(null);
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
-  const [previewEmotion, setPreviewEmotion] = useState<EmotionType>(EmotionType.HAPPY);
 
   useEffect(() => {
     const checkDayRollover = () => {
       const now = new Date();
+      const todayKey = getLocalDateKey(now);
       setCurrentDate((prev) =>
         prev.getFullYear() === now.getFullYear() &&
         prev.getMonth() === now.getMonth() &&
         prev.getDate() === now.getDate()
           ? prev
           : now
+      );
+      setDailyQuest((prev) =>
+        prev.dateKey === todayKey ? prev : createDefaultDailyQuest(todayKey)
       );
     };
     const intervalId = window.setInterval(checkDayRollover, 60_000);
@@ -324,15 +353,64 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    persistGameSave({
+      hasStarted,
+      selectedAvatar,
+      xp,
+      coins,
+      completedCases,
+      weather,
+      isMuted,
+      graphicsQuality,
+      equippedOutfitId,
+      unlockedOutfitIds,
+      equippedSkinId,
+      unlockedSkinIds,
+      equippedAccessoryId,
+      unlockedAccessoryIds,
+      inventory,
+      discoveredHerbs,
+      caughtFish,
+      buildingLevels,
+      unlockedExpansions,
+      claimedAchievements,
+      dailyQuest,
+    });
+  }, [
+    hasStarted,
+    selectedAvatar,
+    xp,
+    coins,
+    completedCases,
+    weather,
+    isMuted,
+    graphicsQuality,
+    equippedOutfitId,
+    unlockedOutfitIds,
+    equippedSkinId,
+    unlockedSkinIds,
+    equippedAccessoryId,
+    unlockedAccessoryIds,
+    inventory,
+    discoveredHerbs,
+    caughtFish,
+    buildingLevels,
+    unlockedExpansions,
+    claimedAchievements,
+    dailyQuest,
+  ]);
+
+  useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (showLearnModal) setShowLearnModal(false);
+        else if (activeBuildingModal) setActiveBuildingModal(null);
         else if (activeOverlay) setActiveOverlay(null);
       }
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, [showLearnModal, activeOverlay]);
+  }, [showLearnModal, activeOverlay, activeBuildingModal]);
 
   const dailyClinicalTip = getDailyClinicalTip(currentDate);
   const avatar = AVATARS.find((a) => a.id === selectedAvatar) || AVATARS[0];
@@ -340,37 +418,10 @@ export default function App() {
   const totalCasesCount = CASES.length;
   const completedCount = completedCases.length;
   const unlockedMedals = PHARMACIST_MEDALS.filter((m) => completedCount >= m.requiredCases);
-  const highestMedal = unlockedMedals[unlockedMedals.length - 1] ?? null;
-  const nextMedal = PHARMACIST_MEDALS.find((m) => completedCount < m.requiredCases) ?? null;
   const overallProgressPct = Math.min(
     100,
     Math.round((completedCount / Math.max(1, totalCasesCount)) * 100)
   );
-
-  const xpProgressPct = rankInfo.next
-    ? Math.min(
-        100,
-        Math.round(
-          ((xp - rankInfo.current.minXp) /
-            Math.max(1, rankInfo.next.minXp - rankInfo.current.minXp)) *
-            100
-        )
-      )
-    : 100;
-
-  useEffect(() => {
-    if (
-      !dashboardCelebrateMedalId ||
-      caseStage !== CaseStage.VILLAGE_HUB ||
-      activeOverlay !== 'medals'
-    ) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      setDashboardCelebrateMedalId(null);
-    }, 3800);
-    return () => window.clearTimeout(timer);
-  }, [dashboardCelebrateMedalId, caseStage, activeOverlay]);
 
   const handleToggleMute = () => {
     const next = !isMuted;
@@ -396,26 +447,43 @@ export default function App() {
     setNewlyUnlockedMedal(null);
   };
 
+  const bumpDailyMetric = (
+    metricKey: 'casesDone' | 'herbsHarvested' | 'fishCaught' | 'shopActions',
+    delta = 1
+  ) => {
+    const todayKey = getLocalDateKey();
+    setDailyQuest((prev) => {
+      const base = prev.dateKey === todayKey ? prev : createDefaultDailyQuest(todayKey);
+      return {
+        ...base,
+        [metricKey]: base[metricKey] + delta,
+      };
+    });
+  };
+
   const handleVictory = (stars: number) => {
     setLastStars(stars);
     setCaseStage(CaseStage.COUNSELING);
+    const wingBonus = unlockedExpansions.includes('clinic_herb_wing') ? 15 : 0;
+    const clinicUpgrade = getClinicUpgradeBonus(buildingLevels.clinic || 1);
+    bumpDailyMetric('casesDone', 1);
     if (activeCase && !completedCases.includes(activeCase.id)) {
       const nextCount = completedCases.length + 1;
       const earnedNow = PHARMACIST_MEDALS.find((m) => m.requiredCases === nextCount) ?? null;
       setNewlyUnlockedMedal(earnedNow);
-      if (earnedNow) {
-        setDashboardCelebrateMedalId(earnedNow.id);
-      }
       setCompletedCases((prev) => [...prev, activeCase.id]);
-      setXp((prev) => prev + activeCase.xpReward);
+      setXp((prev) => prev + activeCase.xpReward + clinicUpgrade.bonusXp);
+      setCoins((prev) => prev + 45 + wingBonus + clinicUpgrade.bonusCoins);
     } else if (activeCase) {
       setNewlyUnlockedMedal(null);
-      setXp((prev) => prev + 40);
+      setXp((prev) => prev + 40 + clinicUpgrade.bonusXp);
+      setCoins((prev) => prev + 15 + wingBonus + clinicUpgrade.bonusCoins);
     }
   };
 
   const handleHudNavigate = (page: HudActionPage) => {
     soundFX.playClick();
+    setActiveBuildingModal(null);
     if (page === 'home') {
       setActiveOverlay(null);
       setShowLearnModal(false);
@@ -441,6 +509,198 @@ export default function App() {
     setActiveOverlay((prev) => (prev === page ? null : page));
   };
 
+  const handleInteractBuilding = (buildingId: VisitableBuildingId) => {
+    soundFX.playClick();
+    setActiveOverlay(null);
+    setShowLearnModal(false);
+    setActiveBuildingModal(buildingId);
+  };
+
+  const handleWalkToBuilding = (buildingId: VisitableBuildingId) => {
+    setNavigateToBuilding((prev) => ({ buildingId, seq: (prev?.seq || 0) + 1 }));
+  };
+
+  const handleHarvestHerb = (entry: HerbalEncyclopediaEntry, useSeedPack = false) => {
+    const gardenBonus = getGardenUpgradeBonus(buildingLevels.garden || 1);
+    const canConsumeSeed = useSeedPack && (inventory.herbal_seed_pack || 0) > 0;
+    const bonusAmount =
+      1 +
+      (unlockedExpansions.includes('botanical_pavilion') ? 1 : 0) +
+      gardenBonus.extraYield +
+      (canConsumeSeed ? 1 : 0);
+    setInventory((prev) => {
+      const next = { ...prev };
+      if (canConsumeSeed && (next.herbal_seed_pack || 0) > 0) {
+        next.herbal_seed_pack -= 1;
+        if (next.herbal_seed_pack <= 0) delete next.herbal_seed_pack;
+      }
+      next[entry.itemId] = (next[entry.itemId] || 0) + bonusAmount;
+      return next;
+    });
+    setDiscoveredHerbs((prev) => (prev.includes(entry.id) ? prev : [...prev, entry.id]));
+    setXp((prev) => prev + 8 + gardenBonus.extraXp + (canConsumeSeed ? 10 : 0));
+    bumpDailyMetric('herbsHarvested', 1);
+  };
+
+  const handleCatchFish = (fish: FishingSpeciesEntry, sizeCm: number, usedBait: boolean) => {
+    const pondBonus = getPondUpgradeBonus(buildingLevels.pond || 1);
+    setInventory((prev) => {
+      const next = { ...prev };
+      if (usedBait && (next.wooden_bait || 0) > 0) {
+        next.wooden_bait -= 1;
+        if (next.wooden_bait <= 0) delete next.wooden_bait;
+      }
+      next[fish.itemId] = (next[fish.itemId] || 0) + 1;
+      return next;
+    });
+    setCaughtFish((prev) => {
+      const existing = prev[fish.id];
+      return {
+        ...prev,
+        [fish.id]: {
+          count: (existing?.count || 0) + 1,
+          bestCm: Math.max(existing?.bestCm || 0, sizeCm),
+        },
+      };
+    });
+    if (pondBonus.coinBonus > 0) {
+      setCoins((prev) => prev + pondBonus.coinBonus);
+    }
+    setXp((prev) => prev + 10);
+    bumpDailyMetric('fishCaught', 1);
+  };
+
+  const handleBuyShopItem = (itemId: string, priceCoins: number, qty: number) => {
+    if (coins < priceCoins) return;
+    setCoins((prev) => prev - priceCoins);
+    setInventory((prev) => ({
+      ...prev,
+      [itemId]: (prev[itemId] || 0) + qty,
+    }));
+    bumpDailyMetric('shopActions', 1);
+  };
+
+  const handleSellInventoryItem = (itemId: string, sellPrice: number) => {
+    const cur = inventory[itemId] || 0;
+    if (cur <= 0) return;
+    setInventory((prev) => {
+      const next = { ...prev };
+      const remain = (next[itemId] || 0) - 1;
+      if (remain <= 0) delete next[itemId];
+      else next[itemId] = remain;
+      return next;
+    });
+    setCoins((prev) => prev + sellPrice);
+    bumpDailyMetric('shopActions', 1);
+  };
+
+  const handleCraftElixir = () => {
+    if ((inventory.meniran_leaf || 0) < 1 || (inventory.temulawak_root || 0) < 1) return;
+    setInventory((prev) => {
+      const next = { ...prev };
+      next.meniran_leaf = (next.meniran_leaf || 1) - 1;
+      if (next.meniran_leaf <= 0) delete next.meniran_leaf;
+      next.temulawak_root = (next.temulawak_root || 1) - 1;
+      if (next.temulawak_root <= 0) delete next.temulawak_root;
+      next.immun_tonic = (next.immun_tonic || 0) + 1;
+      return next;
+    });
+    setXp((prev) => prev + 15);
+    bumpDailyMetric('shopActions', 1);
+  };
+
+  const handleUseElixir = () => {
+    if ((inventory.immun_tonic || 0) < 1) return;
+    setInventory((prev) => {
+      const next = { ...prev };
+      next.immun_tonic = (next.immun_tonic || 1) - 1;
+      if (next.immun_tonic <= 0) delete next.immun_tonic;
+      return next;
+    });
+    setXp((prev) => prev + 25);
+  };
+
+  const handleEquipOutfit = (outfitId: string | null) => {
+    setEquippedOutfitId(outfitId);
+    if (outfitId !== null) {
+      setEquippedSkinId(null);
+    }
+  };
+
+  const handleUnlockOutfit = (outfitId: string, priceCoins: number) => {
+    if (coins < priceCoins) return;
+    setCoins((prev) => prev - priceCoins);
+    setUnlockedOutfitIds((prev) => (prev.includes(outfitId) ? prev : [...prev, outfitId]));
+    setEquippedSkinId(null);
+    setEquippedOutfitId(outfitId);
+  };
+
+  const handleEquipSkin = (skinId: string | null) => {
+    setEquippedSkinId(skinId);
+  };
+
+  const handleUnlockSkin = (skinId: string, priceCoins: number) => {
+    if (coins < priceCoins) return;
+    setCoins((prev) => prev - priceCoins);
+    setUnlockedSkinIds((prev) => (prev.includes(skinId) ? prev : [...prev, skinId]));
+    setEquippedSkinId(skinId);
+  };
+
+  const handleEquipAccessory = (accessoryId: string | null) => {
+    setEquippedAccessoryId(accessoryId);
+  };
+
+  const handleUnlockAccessory = (accessoryId: string, priceCoins: number) => {
+    if (coins < priceCoins) return;
+    setCoins((prev) => prev - priceCoins);
+    setUnlockedAccessoryIds((prev) => (prev.includes(accessoryId) ? prev : [...prev, accessoryId]));
+    setEquippedAccessoryId(accessoryId);
+  };
+
+  const handleBuildExpansion = (plotId: string, costCoins: number, bonusXp: number) => {
+    if (coins < costCoins || unlockedExpansions.includes(plotId)) return;
+    setCoins((prev) => prev - costCoins);
+    setUnlockedExpansions((prev) => [...prev, plotId]);
+    setXp((prev) => prev + bonusXp);
+  };
+
+  const handleUpgradeBuilding = (
+    buildingId: UpgradableBuildingId,
+    nextLevel: 2 | 3,
+    costCoins: number,
+    bonusXp: number
+  ) => {
+    const curLevel = buildingLevels[buildingId] || 1;
+    if (curLevel !== nextLevel - 1 || coins < costCoins) return;
+    setCoins((prev) => prev - costCoins);
+    setBuildingLevels((prev) => ({
+      ...prev,
+      [buildingId]: nextLevel,
+    }));
+    setXp((prev) => prev + bonusXp);
+    bumpDailyMetric('shopActions', 1);
+  };
+
+  const handleClaimAchievement = (achievementId: string, rewardCoins: number) => {
+    if (claimedAchievements.includes(achievementId)) return;
+    setClaimedAchievements((prev) => [...prev, achievementId]);
+    setCoins((prev) => prev + rewardCoins);
+  };
+
+  const handleClaimDailyQuest = (questId: string, rewardCoins: number, rewardXp: number) => {
+    const def = DAILY_QUESTS.find((q) => q.id === questId);
+    if (!def) return;
+    const todayKey = getLocalDateKey();
+    const curDaily = dailyQuest.dateKey === todayKey ? dailyQuest : createDefaultDailyQuest(todayKey);
+    if (curDaily.claimedIds.includes(questId) || curDaily[def.metricKey] < def.target) return;
+    setDailyQuest({
+      ...curDaily,
+      claimedIds: [...curDaily.claimedIds, questId],
+    });
+    setCoins((prev) => prev + rewardCoins);
+    setXp((prev) => prev + rewardXp);
+  };
+
   const renderLearningModal = () => {
     if (!showLearnModal) return null;
     return (
@@ -457,15 +717,108 @@ export default function App() {
           setShowLearnModal(false);
           setShowTitle(false);
           setCaseStage(CaseStage.VILLAGE_HUB);
-          setActiveOverlay('quiz');
+          setActiveOverlay('clinical');
         }}
         onStartPlay={() => {
           setShowLearnModal(false);
+          setHasStarted(true);
           setShowTitle(false);
         }}
       />
     );
   };
+
+  const savedProgressExists = hasSavedAdventure({
+    ...initialSave,
+    hasStarted,
+    selectedAvatar,
+    xp,
+    coins,
+    completedCases,
+    weather,
+    isMuted,
+    graphicsQuality,
+    equippedOutfitId,
+    unlockedOutfitIds,
+    equippedSkinId,
+    unlockedSkinIds,
+    equippedAccessoryId,
+    unlockedAccessoryIds,
+    inventory,
+    discoveredHerbs,
+    caughtFish,
+    buildingLevels,
+    unlockedExpansions,
+    claimedAchievements,
+    dailyQuest,
+  });
+
+  const handleStartNewAdventure = () => {
+    setHasStarted(true);
+    setCaseStage(CaseStage.VILLAGE_HUB);
+    setActiveCase(null);
+    setActiveOverlay(null);
+    setActiveBuildingModal(null);
+    if (savedProgressExists) {
+      setXp(DEFAULT_SAVE_DATA.xp);
+      setCoins(DEFAULT_SAVE_DATA.coins);
+      setCompletedCases([]);
+      setEquippedOutfitId(DEFAULT_SAVE_DATA.equippedOutfitId);
+      setUnlockedOutfitIds([...DEFAULT_SAVE_DATA.unlockedOutfitIds]);
+      setEquippedSkinId(DEFAULT_SAVE_DATA.equippedSkinId);
+      setUnlockedSkinIds([...DEFAULT_SAVE_DATA.unlockedSkinIds]);
+      setEquippedAccessoryId(DEFAULT_SAVE_DATA.equippedAccessoryId);
+      setUnlockedAccessoryIds([...DEFAULT_SAVE_DATA.unlockedAccessoryIds]);
+      setInventory({ ...DEFAULT_INVENTORY });
+      setDiscoveredHerbs([...DEFAULT_SAVE_DATA.discoveredHerbs]);
+      setCaughtFish({});
+      setBuildingLevels({ ...DEFAULT_BUILDING_LEVELS });
+      setUnlockedExpansions([]);
+      setClaimedAchievements([]);
+      setDailyQuest(createDefaultDailyQuest());
+    }
+    setShowTitle(false);
+  };
+
+  const handleContinueAdventure = () => {
+    setHasStarted(true);
+    setCaseStage(CaseStage.VILLAGE_HUB);
+    setActiveOverlay(null);
+    setActiveBuildingModal(null);
+    setShowTitle(false);
+  };
+
+  const handleResetSave = () => {
+    setHasStarted(false);
+    setXp(DEFAULT_SAVE_DATA.xp);
+    setCoins(DEFAULT_SAVE_DATA.coins);
+    setCompletedCases([]);
+    setSelectedAvatar(DEFAULT_SAVE_DATA.selectedAvatar);
+    setWeather(DEFAULT_SAVE_DATA.weather);
+    setEquippedOutfitId(DEFAULT_SAVE_DATA.equippedOutfitId);
+    setUnlockedOutfitIds([...DEFAULT_SAVE_DATA.unlockedOutfitIds]);
+    setEquippedSkinId(DEFAULT_SAVE_DATA.equippedSkinId);
+    setUnlockedSkinIds([...DEFAULT_SAVE_DATA.unlockedSkinIds]);
+    setEquippedAccessoryId(DEFAULT_SAVE_DATA.equippedAccessoryId);
+    setUnlockedAccessoryIds([...DEFAULT_SAVE_DATA.unlockedAccessoryIds]);
+    setInventory({ ...DEFAULT_INVENTORY });
+    setDiscoveredHerbs([...DEFAULT_SAVE_DATA.discoveredHerbs]);
+    setCaughtFish({});
+    setBuildingLevels({ ...DEFAULT_BUILDING_LEVELS });
+    setUnlockedExpansions([]);
+    setClaimedAchievements([]);
+    setDailyQuest(createDefaultDailyQuest());
+    setActiveCase(null);
+    setActiveBuildingModal(null);
+    setCaseStage(CaseStage.VILLAGE_HUB);
+  };
+
+  const claimableDailyCount = DAILY_QUESTS.filter(
+    (q) =>
+      dailyQuest.dateKey === getLocalDateKey(currentDate) &&
+      !dailyQuest.claimedIds.includes(q.id) &&
+      dailyQuest[q.metricKey] >= q.target
+  ).length;
 
   if (showTitle) {
     return (
@@ -473,53 +826,25 @@ export default function App() {
         <TitleScreen
           selectedAvatar={selectedAvatar}
           onSelectAvatar={setSelectedAvatar}
-          onStart={() => setShowTitle(false)}
+          hasSavedProgress={savedProgressExists}
+          savedXp={xp}
+          savedCasesCount={completedCases.length}
+          totalCasesCount={totalCasesCount}
+          weather={weather}
+          onChangeWeather={setWeather}
+          onStartNew={handleStartNewAdventure}
+          onContinue={handleContinueAdventure}
+          onResetSave={handleResetSave}
           onOpenLearnMode={() => setShowLearnModal(true)}
           isMuted={isMuted}
           onToggleMute={handleToggleMute}
+          graphicsQuality={graphicsQuality}
+          onChangeGraphicsQuality={setGraphicsQuality}
         />
         {renderLearningModal()}
       </>
     );
   }
-
-  const overlayTitleMap: Record<InGameOverlay, { title: string; subtitle: string; icon: React.ReactNode }> = {
-    quest: {
-      title: `Daftar Pasien & Misi Triase (${completedCount}/${totalCasesCount})`,
-      subtitle: 'Pilih warga atau langsung klik karakter bertanda seru (!) di diorama 3D',
-      icon: <Compass className="w-5 h-5" />,
-    },
-    medals: {
-      title: 'Medali Apoteker & Progres Karier',
-      subtitle: `Pangkat: ${rankInfo.current.title} · ${xp} XP`,
-      icon: <Trophy className="w-5 h-5" />,
-    },
-    formulary: {
-      title: 'Buku Saku Formularium & Herbarium Desa',
-      subtitle: 'Panduan mekanisme kerja, interaksi obat, dan stabilitas penyimpanan',
-      icon: <BookOpen className="w-5 h-5" />,
-    },
-    calculator: {
-      title: 'Kalkulator Farmasi Klinis',
-      subtitle: 'Hitung dosis anak (mg/kgBB), tetes infus (TPM), dan bersihan kreatinin',
-      icon: <Calculator className="w-5 h-5" />,
-    },
-    quiz: {
-      title: 'Evaluasi Klinis Pre-Test & Post-Test',
-      subtitle: 'Uji ketajaman skrining interaksi obat dan stewardship antibiotik',
-      icon: <ClipboardCheck className="w-5 h-5" />,
-    },
-    character: {
-      title: `Apoteker & ${NPC_LIST.length} Tokoh Desa`,
-      subtitle: 'Ganti apoteker pendamping atau lihat 6 ekspresi dinamis warga desa',
-      icon: <Users className="w-5 h-5" />,
-    },
-    settings: {
-      title: 'Menu Desa, Cuaca & Tips Klinis Harian',
-      subtitle: 'Atur iklim epidemiologi 3D, fase waktu, suara, dan fakta pustaka harian',
-      icon: <Settings className="w-5 h-5" />,
-    },
-  };
 
   // CASE STAGES (Dialogue Intro, Clinical Screening, Tower Defense, Counseling)
   if (caseStage !== CaseStage.VILLAGE_HUB && activeCase) {
@@ -723,13 +1048,13 @@ export default function App() {
                         setCaseStage(CaseStage.VILLAGE_HUB);
                         setActiveCase(null);
                         if (newlyUnlockedMedal) {
-                          setActiveOverlay('medals');
+                          setActiveOverlay('achievement');
                         }
                         setNewlyUnlockedMedal(null);
                       }}
                       className="v18-btn min-h-[44px] px-5 py-2.5 bg-[#FF5A5F] hover:bg-[#EB494E] text-white font-display font-bold text-lg whitespace-nowrap cursor-pointer"
                     >
-                      Kembali ke Desa 3D Asklepios
+                      Kembali ke Kalarma Village
                     </button>
                   </div>
                 </div>
@@ -749,27 +1074,34 @@ export default function App() {
       <VillageDiorama3D
         embeddedInHud
         selectedAvatar={selectedAvatar}
+        equippedOutfitId={equippedOutfitId}
+        equippedSkinId={equippedSkinId}
+        equippedAccessoryId={equippedAccessoryId}
+        unlockedExpansions={unlockedExpansions}
         weather={weather}
         onChangeWeather={setWeather}
         completedCases={completedCases}
         activeCaseId={activeCase?.id ?? null}
         onSelectCase={handleSelectCase}
+        onInteractBuilding={handleInteractBuilding}
+        graphicsQuality={graphicsQuality}
         timeStepTrigger={timeStepTrigger}
         zoomTrigger={zoomTrigger}
         focusHubTrigger={focusHubTrigger}
+        navigateToBuilding={navigateToBuilding}
       />
 
-      {/* Unified Cozy In-Game HUD Holding All Icons, Tools & Navigation */}
+      {/* Unified Cozy In-Game HUD */}
       <GameHUD
         selectedAvatar={selectedAvatar}
         xp={xp}
+        coins={coins}
         rankTitle={rankInfo.current.title}
         completedCount={completedCount}
         totalCases={totalCasesCount}
-        unlockedMedalsCount={unlockedMedals.length}
-        totalMedalsCount={PHARMACIST_MEDALS.length}
         weather={weather}
         isMuted={isMuted}
+        claimableDailyCount={claimableDailyCount}
         dailyTipTitle={`Tips Harian · ${dailyClinicalTip.focusLabel}`}
         dailyTipDrugName={dailyClinicalTip.monograph.name}
         onNavigate={handleHudNavigate}
@@ -789,457 +1121,614 @@ export default function App() {
         onToggleMute={handleToggleMute}
       />
 
-      {/* Unified In-Game Panel Modals (Keeps Game Screen Completely Zero-Scroll) */}
+      {/* Structured Premium RPG Codex & Village Menu */}
       {activeOverlay && (
-        <div
-          className="fixed inset-0 z-40 bg-[#2A160B]/70 flex items-center justify-center p-2.5 sm:p-5 pb-safe"
-          role="dialog"
-          aria-modal="true"
-          aria-label={overlayTitleMap[activeOverlay].title}
-        >
-          <div className="w-full max-w-5xl max-h-[95dvh] sm:max-h-[90dvh] bg-[#FAF4E4] border-[3.5px] border-[#6E4021] rounded-2xl shadow-[0_12px_0_#432512,0_20px_38px_rgba(0,0,0,0.45)] flex flex-col overflow-y-auto text-[#2D2926]">
-            {/* Modal Header */}
-            <div className="px-4 sm:px-6 py-3 bg-gradient-to-b from-[#9B6334] to-[#744522] border-b-[3px] border-[#4A2B14] text-[#FFF8E6] flex items-center justify-between gap-3 shrink-0">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-xl bg-[#FFD166] border-2 border-[#4A2B14] text-[#4A2B14] flex items-center justify-center shrink-0">
-                  {overlayTitleMap[activeOverlay].icon}
-                </div>
-                <div className="min-w-0">
-                  <h2 className="font-display font-bold text-xl sm:text-2xl leading-none truncate">
-                    {overlayTitleMap[activeOverlay].title}
-                  </h2>
-                  <p className="text-[11px] sm:text-xs text-[#FFE8B3] mt-0.5 truncate">
-                    {overlayTitleMap[activeOverlay].subtitle}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  soundFX.playClick();
-                  setActiveOverlay(null);
-                }}
-                className="min-h-[42px] min-w-[42px] rounded-xl bg-[#5C3419] hover:bg-[#FF5A5F] border-2 border-[#E6B66B] text-[#FFF8E6] inline-flex items-center justify-center shrink-0 cursor-pointer transition-colors"
-                aria-label="Tutup panel"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+        <VillageRpgShell
+          activeTab={activeOverlay}
+          onChangeTab={setActiveOverlay}
+          onClose={() => setActiveOverlay(null)}
+          selectedAvatar={selectedAvatar}
+          onSelectAvatar={setSelectedAvatar}
+          xp={xp}
+          coins={coins}
+          completedCases={completedCases}
+          activeCaseId={activeCase?.id ?? null}
+          weather={weather}
+          onChangeWeather={setWeather}
+          isMuted={isMuted}
+          onToggleMute={handleToggleMute}
+          graphicsQuality={graphicsQuality}
+          onChangeGraphicsQuality={setGraphicsQuality}
+          equippedOutfitId={equippedOutfitId}
+          unlockedOutfitIds={unlockedOutfitIds}
+          onEquipOutfit={handleEquipOutfit}
+          onUnlockOutfit={handleUnlockOutfit}
+          equippedSkinId={equippedSkinId}
+          unlockedSkinIds={unlockedSkinIds}
+          onEquipSkin={handleEquipSkin}
+          onUnlockSkin={handleUnlockSkin}
+          equippedAccessoryId={equippedAccessoryId}
+          unlockedAccessoryIds={unlockedAccessoryIds}
+          onEquipAccessory={handleEquipAccessory}
+          onUnlockAccessory={handleUnlockAccessory}
+          inventory={inventory}
+          discoveredHerbs={discoveredHerbs}
+          caughtFish={caughtFish}
+          buildingLevels={buildingLevels}
+          unlockedExpansions={unlockedExpansions}
+          claimedAchievements={claimedAchievements}
+          dailyQuest={dailyQuest}
+          onSelectCase={handleSelectCase}
+          onWalkToBuilding={handleWalkToBuilding}
+          onOpenLearningMode={() => {
+            setActiveOverlay(null);
+            setShowLearnModal(true);
+          }}
+          onStepTime={() => setTimeStepTrigger((n) => n + 1)}
+          onReturnToTitle={() => setShowTitle(true)}
+          onResetSave={handleResetSave}
+          onHarvestHerb={handleHarvestHerb}
+          onCatchFish={handleCatchFish}
+          onBuyShopItem={handleBuyShopItem}
+          onSellInventoryItem={handleSellInventoryItem}
+          onCraftElixir={handleCraftElixir}
+          onUseElixir={handleUseElixir}
+          onUpgradeBuilding={handleUpgradeBuilding}
+          onBuildExpansion={handleBuildExpansion}
+          onClaimAchievement={handleClaimAchievement}
+          onClaimDailyQuest={handleClaimDailyQuest}
+          formularyFocusId={formularyFocusId}
+          onChangeFormularyFocusId={setFormularyFocusId}
+          dailyTipTitle={`Tips Klinis Harian · ${dailyClinicalTip.focusLabel}`}
+          dailyTipDrugName={dailyClinicalTip.monograph.name}
+          dailyTipFact={dailyClinicalTip.factText}
+          dailyTipDrugId={dailyClinicalTip.monograph.id}
+        />
+      )}
 
-            {/* Modal Scrollable Body */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-[#F2EFEB]">
-              {/* OVERLAY 1: DAFTAR PASIEN / QUEST */}
-              {activeOverlay === 'quest' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                    {CASES.map((c) => {
-                      const patient = CHARACTERS[c.patientId];
-                      const isDone = completedCases.includes(c.id);
-                      const isActiveMission = !isDone && activeCase?.id === c.id;
-                      const matchesWeather = c.recommendedWeather === weather;
+      {/* Modal Interaksi 6 Bangunan & Zona Kalarma Village */}
+      {activeBuildingModal && (() => {
+        const priorityCase =
+          CASES.find((c) => !completedCases.includes(c.id) && c.recommendedWeather === weather) ||
+          CASES.find((c) => !completedCases.includes(c.id)) ||
+          null;
 
-                      return (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => handleSelectCase(c)}
-                          className={`v18-card-sm text-left p-4 transition-transform hover:-translate-y-0.5 flex flex-col justify-between gap-3 cursor-pointer ${
-                            isActiveMission
-                              ? 'bg-[#FFD166]/30'
-                              : isDone
-                                ? 'bg-white/90'
-                                : 'bg-white'
-                          }`}
-                        >
-                          <div>
-                            <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-[#2D2926]/75 mb-2">
-                              <span className="truncate">
-                                {patient.name} ({patient.species}) · {c.difficulty}
-                              </span>
-                              <span
-                                className={`inline-flex items-center gap-1 font-bold px-2 py-0.5 border border-[#2D2926] shrink-0 ${
-                                  isDone
-                                    ? 'bg-[#E8EFEA] text-[#2C6E63]'
-                                    : isActiveMission
-                                      ? 'bg-[#FFD166] text-[#2D2926]'
-                                      : matchesWeather
-                                        ? 'bg-[#FF5A5F] text-white'
-                                        : 'bg-[#F2EFEB] text-[#2D2926]'
-                                }`}
-                              >
-                                {isDone && <CheckCircle2 className="w-3.5 h-3.5" />}
-                                {isDone
-                                  ? 'Selesai'
-                                  : isActiveMission
-                                    ? 'Aktif'
-                                    : matchesWeather
-                                      ? 'Prioritas Cuaca'
-                                      : 'Menunggu'}
-                              </span>
-                            </div>
-                            <h3 className="font-display font-bold text-xl text-[#FF5A5F] leading-snug">
-                              {c.title}
-                            </h3>
-                            <p className="text-xs text-[#2D2926]/75 mt-1.5 leading-relaxed line-clamp-2">
-                              {c.summary}
-                            </p>
-                          </div>
+        const buildingMeta: Record<
+          VisitableBuildingId,
+          { title: string; subtitle: string; icon: React.ReactNode; badge: string }
+        > = {
+          clinic: {
+            title: 'Klinik Desa Asklepios',
+            subtitle: 'Pusat Triase, Skrining Resep & Terapi Warga Kalarma Village',
+            icon: <Stethoscope className="w-5 h-5" />,
+            badge: `Level ${buildingLevels.clinic || 1}/3 · Zona Medis Utama`,
+          },
+          house: {
+            title: `Rumah Karakter · Pondok ${avatar.name}`,
+            subtitle: 'Tempat istirahat apoteker muda, catatan pangkat & koleksi medali',
+            icon: <Home className="w-5 h-5" />,
+            badge: `${rankInfo.current.title}`,
+          },
+          boutique: {
+            title: 'Butik Busana & Wardrobe Kalarma',
+            subtitle: 'Studio 3D putar 360° untuk koleksi skin, busana & aksesoris hewan chibi',
+            icon: <Shirt className="w-5 h-5" />,
+            badge: `Level ${buildingLevels.boutique || 1}/3 · ${unlockedSkinIds.length} Skin`,
+          },
+          shop: {
+            title: 'Toko Perlengkapan & Apotek',
+            subtitle: 'Stok obat klinik, sediaan racik & pustaka dosis Guru Lios',
+            icon: <Store className="w-5 h-5" />,
+            badge: `Level ${buildingLevels.shop || 1}/3 · Logistik Farmasi`,
+          },
+          garden: {
+            title: 'Kebun Herbal Mbah Sekar',
+            subtitle: '6 petak tanaman obat berkhasiat dengan sumur irigasi alami',
+            icon: <Sprout className="w-5 h-5" />,
+            badge: `Level ${buildingLevels.garden || 1}/3 · ${WEATHER_INFO[weather].label}`,
+          },
+          pond: {
+            title: 'Kolam Pemancingan Dermaga Selatan',
+            subtitle: 'Dermaga kayu tepi mata air desa untuk bersantai mengamati ikan sungai',
+            icon: <Fish className="w-5 h-5" />,
+            badge: `Level ${buildingLevels.pond || 1}/3 · Dermaga Selatan`,
+          },
+          expansion: {
+            title: 'Area Perluasan Lahan Timur',
+            subtitle: 'Lahan kavling baru untuk pembangunan fasilitas lanjutan desa',
+            icon: <Hammer className="w-5 h-5" />,
+            badge: `${completedCount}/${totalCasesCount} Progres Desa`,
+          },
+        };
 
-                          <div className="flex items-center justify-between pt-2.5 border-t-2 border-dashed border-[#2D2926]/15 text-xs font-bold text-[#2D2926]">
-                            <span className="truncate pr-2">{c.diagnosis}</span>
-                            <span className="font-mono tabular-nums bg-[#FFD166] px-2 py-0.5 border border-[#2D2926] shrink-0">
-                              +{c.xpReward} XP
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
+        const isUpgradableBuilding = BUILDING_UPGRADES.some((b) => b.id === activeBuildingModal);
+        const meta = buildingMeta[activeBuildingModal];
+
+        return (
+          <div
+            className="fixed inset-0 z-40 bg-[#2A160B]/70 flex items-center justify-center p-3 sm:p-5 pb-safe"
+            role="dialog"
+            aria-modal="true"
+            aria-label={meta.title}
+          >
+            <div className="w-full max-w-2xl max-h-[90dvh] bg-[#FAF4E4] border-[3.5px] border-[#6E4021] rounded-2xl shadow-[0_12px_0_#432512,0_20px_38px_rgba(0,0,0,0.45)] flex flex-col overflow-hidden text-[#2D2926]">
+              <div className="px-4 sm:px-6 py-3.5 bg-gradient-to-b from-[#9B6334] to-[#744522] border-b-[3px] border-[#4A2B14] text-[#FFF8E6] flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-[#FFD166] border-2 border-[#4A2B14] text-[#4A2B14] flex items-center justify-center shrink-0">
+                    {meta.icon}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-mono text-[10px] uppercase tracking-wider text-[#FFD166]">
+                      {meta.badge}
+                    </div>
+                    <h2 className="font-display font-bold text-xl sm:text-2xl leading-none truncate">
+                      {meta.title}
+                    </h2>
+                    <p className="text-[11px] text-[#FFE8B3] mt-0.5 truncate">{meta.subtitle}</p>
                   </div>
                 </div>
-              )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundFX.playClick();
+                    setActiveBuildingModal(null);
+                  }}
+                  className="min-h-[40px] min-w-[40px] rounded-xl bg-[#5C3419] hover:bg-[#FF5A5F] border-2 border-[#E6B66B] text-[#FFF8E6] inline-flex items-center justify-center shrink-0 cursor-pointer"
+                  aria-label="Tutup panel bangunan"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
 
-              {/* OVERLAY 2: MEDALI APOTEKER */}
-              {activeOverlay === 'medals' && (
-                <div className="space-y-5">
-                  <div className="v18-card-sm p-4 sm:p-5 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div className="space-y-1">
-                      <div className="font-display font-bold text-2xl text-[#2D2926]">
-                        {highestMedal ? `Pencapaian: ${highestMedal.title}` : 'Mulai Perjalanan Medali'}
-                      </div>
-                      <p className="text-xs sm:text-sm text-[#2D2926]/75">
-                        {nextMedal
-                          ? `${nextMedal.requiredCases - completedCount} kasus lagi untuk membuka Medali ${nextMedal.tier} (${nextMedal.title}).`
-                          : 'Luar biasa! Seluruh 4 Medali Apoteker dan 10 pasien desa telah dituntaskan.'}
-                      </p>
-                    </div>
-                    <div className="sm:w-64 shrink-0 space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-mono font-bold tabular-nums">
-                        <span>PROGRES KASUS</span>
-                        <span>
-                          {completedCount}/{totalCasesCount} ({overallProgressPct}%)
+              <div className="p-4 sm:p-5 overflow-y-auto bg-[#F2EFEB] space-y-4">
+                {activeBuildingModal === 'clinic' && (
+                  <>
+                    <div className="v18-card-sm p-4 bg-white space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-display font-bold text-lg text-[#2D2926]">
+                          Status Ruang Triase Klinik
+                        </span>
+                        <span className="font-mono text-xs font-bold bg-[#E8EFEA] text-[#2C6E63] border border-[#2C6E63] px-2.5 py-0.5 rounded-lg">
+                          {completedCount}/{totalCasesCount} Kasus Tuntas
                         </span>
                       </div>
-                      <div className="w-full h-3 bg-[#F2EFEB] border-2 border-[#2D2926] overflow-hidden">
-                        <div
-                          className="h-full bg-[#FF5A5F] transition-all duration-500"
-                          style={{ width: `${overallProgressPct}%` }}
-                        />
+                      <p className="text-xs text-[#2D2926]/80 leading-relaxed">
+                        {priorityCase
+                          ? `Pasien prioritas saat ini adalah ${CHARACTERS[priorityCase.patientId].name} (${priorityCase.diagnosis}) yang sesuai dengan kondisi cuaca ${WEATHER_INFO[weather].label}.`
+                          : 'Seluruh pasien desa saat ini telah pulih! Anda tetap dapat mengulang simulasi kasus melalui Daftar Pasien.'}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2.5">
+                      {priorityCase && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveBuildingModal(null);
+                            handleSelectCase(priorityCase);
+                          }}
+                          className="min-h-[42px] px-4 py-2 rounded-xl bg-[#FF5A5F] hover:bg-[#EB494E] border-2 border-[#2D2926] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Stethoscope className="w-4 h-4" />
+                          <span>Tangani {CHARACTERS[priorityCase.patientId].name}</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('quest');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#FFD166] hover:bg-[#FFC43D] border-2 border-[#2D2926] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Compass className="w-4 h-4" />
+                        <span>Buka Daftar Pasien</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('clinical');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-white hover:bg-[#E8EFEA] border-2 border-[#2C6E63] text-[#1F4A42] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Calculator className="w-4 h-4" />
+                        <span>Kalkulator &amp; Quiz</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {activeBuildingModal === 'house' && (
+                  <>
+                    <div className="v18-card-sm p-4 bg-white flex items-start gap-3.5">
+                      <img
+                        src={avatar.imagePath}
+                        alt={avatar.name}
+                        referrerPolicy="no-referrer"
+                        className="w-16 h-16 rounded-xl border-2 border-[#6E4021] object-cover shrink-0"
+                      />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="font-display font-bold text-xl text-[#2D2926]">
+                          {avatar.name} · {avatar.title}
+                        </div>
+                        <p className="text-xs text-[#2D2926]/80">{avatar.bonusDetail}</p>
+                        <div className="flex flex-wrap gap-2 pt-1 font-mono text-[11px] font-bold">
+                          <span className="bg-[#FFD166] px-2 py-0.5 border border-[#2D2926] rounded">
+                            {xp} XP
+                          </span>
+                          <span className="bg-[#E8EFEA] text-[#2C6E63] px-2 py-0.5 border border-[#2C6E63] rounded">
+                            {unlockedMedals.length}/{PHARMACIST_MEDALS.length} Medali
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                    <div className="flex flex-wrap gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('wardrobe');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#6E4021] hover:bg-[#522E16] border-2 border-[#4A2B14] text-[#FFF8E6] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <span>Buka Wardrobe Kostum</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('profile');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#FFD166] hover:bg-[#FFC43D] border-2 border-[#2D2926] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Users className="w-4 h-4" />
+                        <span>Profil &amp; Ganti Karakter</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('achievement');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#2C6E63] hover:bg-[#23594F] border-2 border-[#16302B] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Trophy className="w-4 h-4" />
+                        <span>Achievement &amp; Medali</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setActiveBuildingModal(null);
+                          setShowLearnModal(true);
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-white hover:bg-[#E8EFEA] border-2 border-[#2D2926] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <GraduationCap className="w-4 h-4" />
+                        <span>Catatan Belajar</span>
+                      </button>
+                    </div>
+                  </>
+                )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {PHARMACIST_MEDALS.map((medal) => {
-                      const unlocked = completedCount >= medal.requiredCases;
-                      const isCelebrating = unlocked && dashboardCelebrateMedalId === medal.id;
-                      const pct = Math.min(
-                        100,
-                        Math.round((completedCount / medal.requiredCases) * 100)
-                      );
-
-                      return (
-                        <div
-                          key={medal.id}
-                          className={`p-4 flex flex-col justify-between gap-3 transition-all ${
-                            unlocked
-                              ? `v18-card-sm ${medal.cardBg} ${
-                                  isCelebrating ? 'ring-4 ring-[#FFD166]' : ''
-                                }`
-                              : 'bg-[#FAF4E4] border-2 border-dashed border-[#2D2926]/30'
-                          }`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <MedalEmblem
-                              medal={medal}
-                              unlocked={unlocked}
-                              size={46}
-                              celebrate={isCelebrating}
-                            />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center justify-between gap-1">
-                                <span
-                                  className={`font-mono text-[11px] font-bold uppercase tracking-wider ${
-                                    unlocked ? medal.accentText : 'text-[#2D2926]/55'
-                                  }`}
-                                >
-                                  {medal.tier}
-                                </span>
-                                {unlocked ? (
-                                  <CheckCircle2 className="w-4 h-4 text-[#2C6E63] shrink-0" />
-                                ) : (
-                                  <Lock className="w-3.5 h-3.5 text-[#2D2926]/40 shrink-0" />
-                                )}
-                              </div>
-                              <div className="font-display font-bold text-lg text-[#2D2926] leading-tight truncate mt-0.5">
-                                {medal.title}
-                              </div>
-                              <p className="text-xs text-[#2D2926]/75 mt-1 leading-snug">
-                                {medal.description}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <div className="flex items-center justify-between text-[11px] font-mono font-bold tabular-nums text-[#2D2926]/75">
-                              <span>{unlocked ? 'DIRAIH' : 'TARGET KASUS'}</span>
-                              <span>
-                                {Math.min(completedCount, medal.requiredCases)}/{medal.requiredCases}
-                              </span>
-                            </div>
-                            <div className="w-full h-2 bg-white border border-[#2D2926] overflow-hidden">
-                              <div
-                                className="h-full transition-all duration-500"
-                                style={{
-                                  width: `${pct}%`,
-                                  backgroundColor: unlocked ? medal.ringColor : '#2D2926',
-                                  opacity: unlocked ? 1 : 0.25,
-                                }}
-                              />
-                            </div>
-                          </div>
+                {activeBuildingModal === 'boutique' && (
+                  <>
+                    <div className="v18-card-sm p-4 bg-white flex items-start gap-3.5">
+                      <img
+                        src={avatar.imagePath}
+                        alt={avatar.name}
+                        referrerPolicy="no-referrer"
+                        className="w-16 h-16 rounded-xl border-2 border-[#6E4021] object-cover shrink-0"
+                      />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="font-display font-bold text-xl text-[#2D2926]">
+                          Butik Jahit &amp; Koleksi Gaya Kalarma Village
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* OVERLAY 3: BUKU FORMULARIUM */}
-              {activeOverlay === 'formulary' && <FormularyBook initialDrugId={formularyFocusId} />}
-
-              {/* OVERLAY 4: KALKULATOR FARMASI */}
-              {activeOverlay === 'calculator' && <CalculatorSuite />}
-
-              {/* OVERLAY 5: QUIZ EVALUASI */}
-              {activeOverlay === 'quiz' && <ClinicalQuiz />}
-
-              {/* OVERLAY 6: GANTI AVATAR & 15 TOKOH */}
-              {activeOverlay === 'character' && (
-                <div className="space-y-6">
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="font-display font-bold text-2xl text-[#2D2926]">
-                        Pilih Apoteker Pendamping (Aktif di Dunia 3D)
-                      </h3>
-                      <span className="font-mono text-xs font-bold bg-[#FFD166] border-2 border-[#2D2926] px-2.5 py-1 tabular-nums">
-                        {xp} XP · {xpProgressPct}% ke Pangkat Berikutnya
-                      </span>
+                        <p className="text-xs text-[#2D2926]/80 leading-relaxed">
+                          Coba pratinjau model 3D 360° dengan fitur zoom sebelum membeli! Tersedia 6 skin tematik (Petualang, Apoteker, Berkebun, Nelayan, Festival, Musiman), busana klinik, serta aksesoris 3D yang langsung mengubah tampilan karakter di desa.
+                        </p>
+                        <div className="flex flex-wrap gap-2 pt-1 font-mono text-[11px] font-bold">
+                          <span className="bg-[#FFE8A3] px-2 py-0.5 border border-[#6E4021] rounded">
+                            {coins} Koin Daun
+                          </span>
+                          <span className="bg-[#E8EFEA] text-[#2C6E63] px-2 py-0.5 border border-[#2C6E63] rounded">
+                            {unlockedSkinIds.length}/6 Skin · {unlockedAccessoryIds.length}/8 Aksesoris
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                      {AVATARS.map((av) => {
-                        const selected = av.id === selectedAvatar;
-                        return (
+                    <div className="flex flex-wrap gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('wardrobe');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#6E4021] hover:bg-[#522E16] border-2 border-[#4A2B14] text-[#FFF8E6] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Shirt className="w-4 h-4" />
+                        <span>Masuk Studio Wardrobe 3D</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('profile');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#FFD166] hover:bg-[#FFC43D] border-2 border-[#2D2926] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Users className="w-4 h-4" />
+                        <span>Profil &amp; Koleksi 22 Hewan</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {activeBuildingModal === 'shop' && (
+                  <>
+                    <div className="v18-card-sm p-4 bg-white space-y-2.5">
+                      <div className="font-display font-bold text-lg text-[#2D2926]">
+                        Persediaan Apotek &amp; Toko Perlengkapan Guru Lios
+                      </div>
+                      <p className="text-xs text-[#2D2926]/80">
+                        Belanja umpan pancing, bibit herbal, atau jual hasil panen &amp; ikan. Anda juga dapat memeriksa stabilitas penyimpanan obat sesuai cuaca ({WEATHER_INFO[weather].label}).
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        {FORMULARY_DATA.slice(0, 4).map((item) => (
                           <button
-                            key={av.id}
+                            key={item.id}
                             type="button"
                             onClick={() => {
                               soundFX.playClick();
-                              setSelectedAvatar(av.id);
+                              setFormularyFocusId(item.id);
+                              setActiveBuildingModal(null);
+                              setActiveOverlay('formulary');
                             }}
-                            className={`text-left p-3.5 rounded-xl border-[2.5px] transition-all flex items-start gap-3 cursor-pointer ${
-                              selected
-                                ? 'bg-[#FFE8A3] border-[#6E4021] shadow-[0_4px_0_#6E4021]'
-                                : 'bg-white border-[#C8A46D] hover:bg-[#FFFDF7]'
-                            }`}
+                            className="p-2.5 rounded-xl bg-[#FAF4E4] hover:bg-[#FFE8A3] border-2 border-[#C8A46D] text-left cursor-pointer"
                           >
-                            <div className="relative w-14 h-14 rounded-xl overflow-hidden border-2 border-[#6E4021] bg-[#F2EFEB] shrink-0">
-                              <img
-                                src={av.imagePath}
-                                alt={av.name}
-                                referrerPolicy="no-referrer"
-                                className="w-full h-full object-cover"
-                              />
-                              {selected && (
-                                <span className="absolute top-1 right-1 w-4 h-4 rounded bg-[#2C6E63] text-white flex items-center justify-center">
-                                  <Check className="w-3 h-3" />
-                                </span>
-                              )}
+                            <div className="font-bold text-xs text-[#2D2926] truncate">
+                              {item.name}
                             </div>
-                            <div className="min-w-0">
-                              <div className="font-display font-bold text-xl leading-none text-[#2D2926]">
-                                {av.name}
-                              </div>
-                              <div className="font-mono text-[10px] font-bold text-[#9A5016] mt-0.5">
-                                {av.species} · {av.title}
-                              </div>
-                              <p className="text-[11px] text-[#4A2B14]/85 mt-1 leading-snug">
-                                {av.bonusDetail}
-                              </p>
+                            <div className="font-mono text-[10px] text-[#2C6E63] truncate">
+                              {item.category}
                             </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="space-y-3 pt-4 border-t-2 border-dashed border-[#2D2926]/20">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="font-display font-bold text-2xl text-[#2D2926]">
-                        {NPC_LIST.length} Mentor &amp; Warga Desa Asklepios
-                      </h3>
-                      <div className="flex flex-wrap gap-1.5">
-                        {ALL_EMOTIONS.map((em) => (
-                          <button
-                            key={em.id}
-                            type="button"
-                            onClick={() => {
-                              soundFX.playClick();
-                              setPreviewEmotion(em.id);
-                            }}
-                            className={`min-h-[34px] px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider cursor-pointer ${
-                              previewEmotion === em.id
-                                ? 'bg-[#FF5A5F] text-white border-2 border-[#2D2926]'
-                                : 'bg-white text-[#2D2926] border-2 border-[#2D2926]/25'
-                            }`}
-                          >
-                            {em.label}
                           </button>
                         ))}
                       </div>
                     </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                      {NPC_LIST.map((npcId) => {
-                        const char = CHARACTERS[npcId];
-                        return (
-                          <div
-                            key={npcId}
-                            className="v18-card-sm p-3.5 flex items-start gap-3 bg-white"
-                          >
-                            <CharacterPortrait characterId={npcId} emotion={previewEmotion} size={60} />
-                            <div className="min-w-0">
-                              <div className="font-mono text-[10px] font-bold uppercase text-[#2D2926]/65">
-                                {char.group === 'mentor' ? 'Tenaga Medis' : 'Warga Desa'} ·{' '}
-                                {char.species}
-                              </div>
-                              <div className="font-display font-bold text-xl text-[#FF5A5F] leading-tight">
-                                {char.name}
-                              </div>
-                              <div className="text-[11px] font-bold text-[#2D2926]/80">{char.role}</div>
-                              <p className="text-xs text-[#2D2926]/75 mt-1 leading-snug">{char.bio}</p>
-                              {char.personality && (
-                                <p className="text-[11px] text-[#2C6E63] font-medium mt-1.5 leading-snug">
-                                  <span className="font-bold">Kepribadian:</span> {char.personality}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div className="flex flex-wrap gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('shop');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#6E4021] hover:bg-[#522E16] border-2 border-[#4A2B14] text-[#FFF8E6] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Store className="w-4 h-4" />
+                        <span>Buka Toko Desa ({coins} Koin)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setFormularyFocusId(null);
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('formulary');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#2C6E63] hover:bg-[#23594F] border-2 border-[#16302B] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <BookOpen className="w-4 h-4" />
+                        <span>Buka Formularium</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('clinical');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#FFD166] hover:bg-[#FFC43D] border-2 border-[#2D2926] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <ClipboardCheck className="w-4 h-4" />
+                        <span>Kalkulator &amp; Quiz</span>
+                      </button>
                     </div>
-                  </div>
-                </div>
-              )}
+                  </>
+                )}
 
-              {/* OVERLAY 7: MENU DESA, CUACA, AUDIO & TIPS HARIAN */}
-              {activeOverlay === 'settings' && (
-                <div className="space-y-5">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Cuaca & Waktu */}
-                    <div className="v18-card-sm p-4 bg-white space-y-3">
-                      <div className="flex items-center gap-2 font-display font-bold text-xl text-[#2D2926]">
-                        <CloudSun className="w-5 h-5 text-[#FF5A5F]" />
-                        <span>Cuaca &amp; Siklus Waktu Desa 3D</span>
+                {activeBuildingModal === 'garden' && (
+                  <>
+                    <div className="v18-card-sm p-4 bg-white space-y-2.5">
+                      <div className="font-display font-bold text-lg text-[#2D2926]">
+                        6 Petak Fitofarmaka &amp; Obat Herbal Terstandar
                       </div>
-                      <p className="text-xs text-[#2D2926]/75">
-                        Cuaca memengaruhi prioritas kasus warga dan efek gelombang kuman di benteng terapi:
+                      <p className="text-xs text-[#2D2926]/80">
+                        Kebun herbal terawat bersama Mbah Sekar. Sumur batu menjaga kelembapan akar meniran, temulawak, dan herbal Kalarma Village untuk diracik di klinik.
                       </p>
-                      <div className="grid grid-cols-2 gap-2">
-                        {WEATHER_ORDER.map((w) => {
-                          const active = weather === w;
-                          return (
-                            <button
-                              key={w}
-                              type="button"
-                              onClick={() => {
-                                soundFX.playClick();
-                                setWeather(w);
-                              }}
-                              className={`min-h-[42px] px-3 py-2 rounded-xl border-2 text-xs font-bold text-left cursor-pointer transition-all ${
-                                active
-                                  ? 'bg-[#FF5A5F] text-white border-[#2D2926]'
-                                  : 'bg-[#F2EFEB] text-[#2D2926] border-[#2D2926]/30 hover:bg-[#FFD166]/40'
-                              }`}
-                            >
-                              {WEATHER_INFO[w].label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            soundFX.playClick();
-                            setTimeStepTrigger((n) => n + 1);
-                          }}
-                          className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#FFD166] border-2 border-[#2D2926] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <Clock className="w-4 h-4" />
-                          <span>Lanjutkan Fase Waktu</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleToggleMute}
-                          className="min-h-[40px] px-3.5 py-2 rounded-xl bg-white border-2 border-[#2D2926] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
-                        >
-                          {isMuted ? <VolumeX className="w-4 h-4 text-[#FF5A5F]" /> : <Volume2 className="w-4 h-4 text-[#2C6E63]" />}
-                          <span>{isMuted ? 'Suara: Mati' : 'Suara: Aktif'}</span>
-                        </button>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div className="p-3 rounded-xl bg-[#F0FDF9] border-2 border-[#2C6E63]/50 space-y-1">
+                          <div className="font-bold text-xs text-[#1F4A42]">
+                            Meniran (Phyllanthus niruri)
+                          </div>
+                          <p className="text-[11px] text-[#2D2926]/75">
+                            Fitofarmaka imunomodulator untuk pemulihan ISPA &amp; faringitis viral.
+                          </p>
+                        </div>
+                        <div className="p-3 rounded-xl bg-[#FFFBEB] border-2 border-[#D97706]/50 space-y-1">
+                          <div className="font-bold text-xs text-[#92400E]">
+                            Temulawak (Curcuma xanthorrhiza)
+                          </div>
+                          <p className="text-[11px] text-[#2D2926]/75">
+                            OHT hepatoprotektor &amp; pelindung mukosa lambung saat masa pemulihan.
+                          </p>
+                        </div>
                       </div>
                     </div>
+                    <div className="flex flex-wrap gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('herbal');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#2C6E63] hover:bg-[#23594F] border-2 border-[#16302B] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Sprout className="w-4 h-4" />
+                        <span>Panen &amp; Ensiklopedia Herbal</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setFormularyFocusId('meniran');
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('formulary');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#FFD166] hover:bg-[#FFC43D] border-2 border-[#2D2926] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <BookOpen className="w-4 h-4" />
+                        <span>Monografi Formularium</span>
+                      </button>
+                    </div>
+                  </>
+                )}
 
-                    {/* Tips Klinis Harian */}
-                    <div className="v18-card-sm p-4 bg-white flex flex-col justify-between gap-3">
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-2 font-mono text-[11px] font-bold uppercase text-[#B45309]">
-                          <Lightbulb className="w-4 h-4" />
-                          <span>Tips Klinis Harian · {dailyClinicalTip.formattedDate}</span>
-                        </div>
-                        <div className="font-display font-bold text-2xl text-[#FF5A5F]">
-                          {dailyClinicalTip.monograph.name}
-                        </div>
-                        <div className="font-mono text-[10px] font-bold uppercase text-[#2C6E63]">
-                          Fokus: {dailyClinicalTip.focusLabel}
-                        </div>
-                        <p className="text-xs sm:text-sm text-[#2D2926]/85 leading-relaxed">
-                          {dailyClinicalTip.factText}
-                        </p>
+                {activeBuildingModal === 'pond' && (
+                  <>
+                    <div className="v18-card-sm p-4 bg-white space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-display font-bold text-lg text-[#2D2926]">
+                          Ekosistem Mata Air &amp; Dermaga Kayu
+                        </span>
+                        <span className="font-mono text-[11px] font-bold bg-[#E0F2FE] text-[#0369A1] border border-[#0284C7] px-2 py-0.5 rounded-lg inline-flex items-center gap-1">
+                          <Droplets className="w-3.5 h-3.5" />
+                          Air Jernih
+                        </span>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            soundFX.playClick();
-                            setFormularyFocusId(dailyClinicalTip.monograph.id);
-                            setActiveOverlay('formulary');
-                          }}
-                          className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#E8EFEA] hover:bg-[#D1E5D9] border-2 border-[#2C6E63] text-xs font-bold text-[#1F4A42] inline-flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <BookOpen className="w-4 h-4" />
-                          <span>Buka di Buku Obat</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            soundFX.playClick();
-                            setActiveOverlay(null);
-                            setShowTitle(true);
-                          }}
-                          className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#FAF4E4] hover:bg-[#FFD166] border-2 border-[#6E4021] text-xs font-bold text-[#4A2B14] inline-flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <Home className="w-4 h-4" />
-                          <span>Ke Layar Pembuka</span>
-                        </button>
+                      <p className="text-xs text-[#2D2926]/80 leading-relaxed">
+                        Dermaga pemancingan di tepi kolam selatan menampung beragam ikan sungai lokal. Lempar kail untuk mengisi Koleksi Ikan Kalarma Village atau ubah cuaca &amp; waktu di tepi air.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('fishing');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#0284C7] hover:bg-[#0369A1] border-2 border-[#0C4A6E] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Fish className="w-4 h-4" />
+                        <span>Memancing &amp; Koleksi Ikan</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCycleWeather}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-white border-2 border-[#2D2926] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <CloudSun className="w-4 h-4" />
+                        <span>Ubah Cuaca ({WEATHER_INFO[weather].label})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setTimeStepTrigger((n) => n + 1);
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#FFD166] hover:bg-[#FFC43D] border-2 border-[#2D2926] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Clock className="w-4 h-4" />
+                        <span>Ganti Fase Waktu</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {activeBuildingModal === 'expansion' && (
+                  <>
+                    <div className="v18-card-sm p-4 bg-white space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-display font-bold text-lg text-[#2D2926]">
+                          Kavling Pengembangan Kalarma Village
+                        </span>
+                        <span className="font-mono text-xs font-bold bg-[#FFFBEB] text-[#92400E] border border-[#D97706] px-2.5 py-0.5 rounded-lg">
+                          {overallProgressPct}% Kesiapan
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#2D2926]/80 leading-relaxed">
+                        Patok kayu di padang rumput timur menandai zona perluasan desa. Buka Manajemen Perluasan Lahan untuk membangun fasilitas baru seperti Paviliun Herbal &amp; Sayap Klinik.
+                      </p>
+                      <div className="text-xs font-bold text-[#2C6E63] inline-flex items-center gap-1.5">
+                        <HeartHandshake className="w-4 h-4" />
+                        <span>
+                          Progres dukungan warga: {completedCount} dari {totalCasesCount} kasus selesai ({xp} XP · {coins} Koin Daun)
+                        </span>
                       </div>
                     </div>
+                    <div className="flex flex-wrap gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('expansion');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#6E4021] hover:bg-[#522E16] border-2 border-[#4A2B14] text-[#FFF8E6] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Hammer className="w-4 h-4" />
+                        <span>Manajemen Perluasan Lahan</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setActiveBuildingModal(null);
+                          setActiveOverlay('quest');
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-[#2C6E63] hover:bg-[#23594F] border-2 border-[#16302B] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Compass className="w-4 h-4" />
+                        <span>Lihat Misi Warga</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {isUpgradableBuilding && (
+                  <div className="pt-3 border-t border-[#D6BE93] flex items-center justify-between gap-3">
+                    <span className="text-xs font-semibold text-[#6E4021]">
+                      Tingkatkan fasilitas bangunan untuk bonus permanen.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundFX.playClick();
+                        setActiveBuildingModal(null);
+                        setActiveOverlay('upgrade');
+                      }}
+                      className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#FFE8A3] hover:bg-[#FFD166] border-2 border-[#6E4021] text-[#3E210F] text-xs font-bold inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
+                    >
+                      <Hammer className="w-3.5 h-3.5" />
+                      <span>Upgrade Bangunan</span>
+                    </button>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {renderLearningModal()}
     </div>

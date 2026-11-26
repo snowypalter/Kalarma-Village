@@ -148,7 +148,7 @@ export const LearningModeModal: React.FC<LearningModeModalProps> = ({
       className="fixed inset-0 z-50 bg-[#2D2926]/70 flex items-center justify-center p-3 sm:p-5"
       role="dialog"
       aria-modal="true"
-      aria-label="Mode Belajar Akademi Apoteker Asklepios"
+      aria-label="Mode Belajar Akademi Farmasi Kalarma Village"
     >
       <div className="w-full max-w-4xl max-h-[90dvh] bg-[#FAF4E4] border-[3.5px] border-[#6E4021] rounded-2xl shadow-[0_12px_0_#432512,0_20px_38px_rgba(0,0,0,0.4)] flex flex-col overflow-hidden text-[#3E2414]">
         {/* Cozy Wood-Carved Modal Header */}
@@ -159,7 +159,7 @@ export const LearningModeModal: React.FC<LearningModeModalProps> = ({
             </div>
             <div className="min-w-0">
               <h2 className="font-display font-bold text-xl sm:text-2xl leading-none truncate">
-                Mode Belajar · Akademi Apoteker
+                Mode Belajar · Kalarma Village
               </h2>
               <p className="text-[11px] sm:text-xs text-[#FFE8B3] mt-0.5 truncate">
                 Pahami alur klinik, hitung dosis pediatrik, dan kenali jebakan interaksi obat sebelum bertugas

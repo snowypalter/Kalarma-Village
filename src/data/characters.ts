@@ -1,9 +1,10 @@
 import { AvatarId, AvatarProfile, CharacterId, CharacterProfile, WeatherType } from '../types/pharmacy';
 
 export const VILLAGE_KEY_ART = '/src/assets/images/village_asklepios_keyart_1795572879382.jpg';
-export const OPENING_HERO_ART = '/src/assets/images/opening_cast_chibi_landscape_1795608604919.jpg';
-export const OPENING_CHIBI_LANDSCAPE = '/src/assets/images/opening_cast_chibi_landscape_1795608604919.jpg';
-export const OPENING_CHIBI_MOBILE = '/src/assets/images/opening_cast_chibi_mobile_1795608605884.jpg';
+export const VILLAGE_BACKGROUND = '/images/kalarma-village-opening.jpg';
+export const OPENING_HERO_ART = VILLAGE_BACKGROUND;
+export const OPENING_CHIBI_LANDSCAPE = VILLAGE_BACKGROUND;
+export const OPENING_CHIBI_MOBILE = VILLAGE_BACKGROUND;
 
 export const AVATARS: AvatarProfile[] = [
   {
@@ -117,7 +118,7 @@ export const CHARACTERS: Record<CharacterId, CharacterProfile> = {
     id: 'lios',
     name: 'Guru Lios',
     species: 'Landak Mini',
-    role: 'Kepala Apoteker Desa Asklepios',
+    role: 'Kepala Apoteker Klinik Asklepios · Kalarma Village',
     group: 'mentor',
     primaryColor: '#8D7B68',
     secondaryColor: '#2C6E63',
@@ -216,7 +217,7 @@ export const CHARACTERS: Record<CharacterId, CharacterProfile> = {
     id: 'nino',
     name: 'Nino',
     species: 'Tupai Kurir',
-    role: 'Kurir Pos Cepat Desa Asklepios',
+    role: 'Kurir Pos Cepat Kalarma Village',
     group: 'villager',
     primaryColor: '#C97B42',
     secondaryColor: '#F4DFC8',
@@ -365,7 +366,7 @@ export const CAREER_RANKS: CareerRank[] = [
   { title: 'Asisten Apoteker Muda', minXp: 150 },
   { title: 'Apoteker Muda Klinik', minXp: 350 },
   { title: 'Apoteker Klinis Senior', minXp: 600 },
-  { title: 'Master Tabib Asklepios', minXp: 900 },
+  { title: 'Master Tabib Kalarma', minXp: 900 },
 ];
 
 export function getRankForXp(xp: number): { current: CareerRank; next: CareerRank | null } {

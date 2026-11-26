@@ -77,6 +77,9 @@ const WAYPOINTS = [
   { x: 870, y: 290 },
 ];
 
+const LOGICAL_W = 900;
+const LOGICAL_H = 420;
+
 const TOWER_SLOTS: { id: number; x: number; y: number }[] = [
   { id: 0, x: 150, y: 205 },
   { id: 1, x: 345, y: 210 },
@@ -229,10 +232,9 @@ export const TherapyDefenseCanvas: React.FC<TherapyDefenseCanvasProps> = ({
     if (!canvas || sim.outcome !== 'playing') return;
 
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = (clientX - rect.left) * scaleX;
-    const y = (clientY - rect.top) * scaleY;
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const x = ((clientX - rect.left) / rect.width) * LOGICAL_W;
+    const y = ((clientY - rect.top) / rect.height) * LOGICAL_H;
 
     // Find nearest node within 44px radius
     let clickedNode: TowerNode | null = null;
@@ -327,15 +329,19 @@ export const TherapyDefenseCanvas: React.FC<TherapyDefenseCanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Handle canvas DPI scaling untuk pixel-perfect rendering
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    
-    if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      ctx.scale(dpr, dpr);
-    }
+    const syncCanvasBuffer = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const rect = canvas.getBoundingClientRect();
+      const targetW = Math.max(LOGICAL_W, Math.round(rect.width * dpr));
+      const targetH = Math.max(LOGICAL_H, Math.round(rect.height * dpr));
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+      }
+    };
+    syncCanvasBuffer();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(syncCanvasBuffer) : null;
+    ro?.observe(canvas);
 
     let animId = 0;
     let lastTime = performance.now();
@@ -348,8 +354,8 @@ export const TherapyDefenseCanvas: React.FC<TherapyDefenseCanvasProps> = ({
       const dt = clampedDt * speedRef.current;
 
       const sim = simRef.current;
-      const w = canvas.width / dpr;
-      const h = canvas.height / dpr;
+      const w = LOGICAL_W;
+      const h = LOGICAL_H;
 
       // UPDATE SIMULATION
       if (sim.outcome === 'playing' && dt > 0) {
@@ -523,7 +529,8 @@ export const TherapyDefenseCanvas: React.FC<TherapyDefenseCanvasProps> = ({
         }
       }
 
-      // RENDER ARENA
+      // RENDER ARENA (scaled cleanly into logical 900x420 coordinate space)
+      ctx.setTransform(canvas.width / LOGICAL_W, 0, 0, canvas.height / LOGICAL_H, 0, 0);
       ctx.save();
       if (sim.shakeTime > 0) {
         const mag = sim.shakeTime * 12;
@@ -725,7 +732,10 @@ export const TherapyDefenseCanvas: React.FC<TherapyDefenseCanvasProps> = ({
     };
 
     animId = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(animId);
+    return () => {
+      cancelAnimationFrame(animId);
+      ro?.disconnect();
+    };
   }, [scenario, weather, avatar]);
 
   return (

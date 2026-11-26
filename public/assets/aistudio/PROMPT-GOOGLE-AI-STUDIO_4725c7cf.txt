@@ -1,0 +1,80 @@
+PROMPT GOOGLE AI STUDIO — REDESIGN KALARMA VILLAGE
+
+Lakukan redesign pada PROJECT YANG SUDAH ADA. Jangan membuat project baru, jangan menghapus sistem gameplay farmasi, jangan mengganti framework, dan jangan mengarang nama file/komponen sebelum memeriksa struktur source code.
+
+IDENTITAS BARU
+- Ganti seluruh nama produk/game yang tampil kepada pemain menjadi “Kalarma Village”.
+- Subjudul: “A Cozy Fantasy Adventure”.
+- Perbarui title browser, splash screen, menu utama, logo teks, loading screen, dan label UI.
+- Pertahankan nama internal variabel/API jika perubahan akan merusak kompatibilitas; fokus pada nama yang terlihat pemain.
+- Gunakan font display rounded playful seperti Baloo 2 atau Fredoka untuk judul, dan font sans yang mudah dibaca untuk isi.
+
+REFERENSI VISUAL
+- Gunakan gambar opening `public/images/kalarma-village-opening.jpg` untuk background halaman opening.
+- Gaya dunia gameplay mengacu pada screenshot referensi keempat: isometric low-poly 3D, bentuk sederhana tetapi kaya detail, warna hijau hidup, pepohonan rounded, rumah kayu, jalan batu, taman, dan pencahayaan hangat.
+- Jangan memakai gambar opening sebagai background gameplay. Gameplay harus tetap berupa scene 3D interaktif.
+- Jangan membuat UI ikon emoji dipaksakan menggantikan aset. Gunakan ikon konsisten dari icon library yang sudah ada atau buat ikon vektor bergaya game, dengan ukuran, stroke, palet, dan frame yang seragam.
+
+OPENING
+- Integrasikan `KalarmaVillageOpening.tsx` dan gunakan sebagai title screen.
+- Hubungkan Mulai Petualangan ke alur start game asli, Lanjutkan ke save/load asli, Pengaturan ke settings asli.
+- Jangan membuat tombol yang hanya console.log atau tidak melakukan apa pun.
+
+WORLD / ISOMETRIC GRAPHICS
+- Redesign scene 3D utama menjadi isometric/cozy low-poly seperti referensi keempat.
+- Buat variasi pohon, semak, bunga, batu, pagar, lampu, jalan, air, jembatan, dan dekorasi.
+- Pakai instancing/merged geometry untuk vegetasi berulang, LOD atau impostor sederhana, shadow map berkualitas wajar, fog lembut, ambient + directional light.
+- Target laptop RAM 8 GB dan integrated graphics: batasi draw calls, texture size, shadow resolution, jumlah lampu realtime, dan transparansi; sediakan quality setting Low/Medium.
+
+FARMING — HARUS TERJADI DI DUNIA 3D, BUKAN PAGE SAJA
+- Tambahkan area kebun fisik di sebelah apotek: bedeng tanah, petak tanam, gudang alat, sumur/penampung air, pagar, papan nama, dan kios bibit.
+- Pemain berjalan ke kebun; klik/tap petak untuk mencangkul, memilih bibit, menanam, menyiram, memupuk, dan memanen.
+- Tanaman tumbuh bertahap secara visual (bibit → tunas → dewasa → siap panen), bukan hanya timer di panel.
+- Tambahkan perluasan lahan bertahap: area baru terlihat tertutup pagar/semak/reruntuhan; pemain membayar koin/material, animasikan pembukaan lahan, lalu bangun petak tambahan.
+- Simpan tanaman, waktu tanam, status air, hasil panen, level kebun, lahan terbuka, dan bangunan ke sistem save utama. Jangan reset save lama.
+- Tanaman awal: mint, jahe, kunyit, serai, pegagan, lavender. Data botani untuk edukasi harus hati-hati dan tidak memberi klaim penyembuhan.
+
+FISHING — MINIGAME INTERAKTIF DI KOLAM 3D
+- Bangun kolam fisik dengan air animasi, tepian batu, tanaman air, dermaga kecil, bangku, dan spot memancing.
+- Pemain berjalan ke dermaga dan berinteraksi dengan spot; mulai minigame casting.
+- Buat animasi lempar kail, pelampung bergerak, indikator bite, timing meter/reel interaction, dan hasil tangkapan.
+- Ikan terlihat berenang di kolam; tangkapan menambah album ikan, material/coin, dan quest.
+- Tambahkan variasi ikan umum/langka, cuaca/waktu yang memengaruhi peluang jika sesuai sistem game.
+- Jangan jadikan memancing sekadar halaman dengan dua tombol. Harus ada aktivitas visual dan interaksi gameplay.
+
+CHARACTER WARDROBE — SKIN HARUS TERLIHAT PADA MODEL 3D
+- Buat bangunan/ruang Wardrobe atau butik karakter di dunia game.
+- Saat pemain berinteraksi, tampilkan model karakter 3D besar yang bisa diputar 360° dan di-zoom.
+- Skin harus mengubah mesh/outfit/material/accessory karakter 3D sungguhan. Jangan hanya menerapkan CSS filter pada portrait.
+- Tambahkan kategori outfit, rambut/topi, aksesori, warna, preview sebelum membeli, equip/unequip, rarity, harga, dan koleksi skin.
+- Tiap karakter harus mempertahankan siluet, spesies, proporsi, wajah, dan identitas masing-masing.
+- Simpan skin yang dimiliki dan skin aktif ke save utama.
+
+BANGUNAN & EKSPANSI
+- Tambahkan bangunan fisik yang dapat dikunjungi: apotek, rumah karakter, kebun herbal, kolam pemancingan, butik/wardrobe, toko bibit, gudang, papan quest, dan area festival.
+- Bangunan dapat di-upgrade; tampilkan perubahan model/ornamen saat level meningkat.
+- Tambahkan sistem land expansion dengan preview area, biaya, konfirmasi, animasi konstruksi, dan state permanen.
+
+FITUR TAMBAHAN
+- Daily quest, achievement, album tanaman/ikan, collection book, companion/pet, dekorasi rumah, crafting sederhana, festival musiman.
+- Semua fitur punya tujuan, reward, dan integrasi dengan progression; jangan menambah menu kosong.
+- Pertahankan seluruh quiz, kasus klinis, formulary, kalkulator farmasi, dan konten edukasi yang sudah ada.
+
+PERSYARATAN IMPLEMENTASI
+1. Audit source code dan identifikasi scene renderer, character factory, navigation, state/store, save system, dan HUD sebelum mengedit.
+2. Gunakan arsitektur dan library yang sudah ada. Jangan menambahkan dependency besar tanpa alasan.
+3. Jangan menimpa file inti secara membabi buta; lakukan perubahan minimal dan terintegrasi.
+4. Jangan gunakan localStorage key baru yang memisahkan progres dari save utama. Buat migrasi save dengan default yang aman.
+5. Semua tombol harus punya aksi nyata.
+6. Jangan menghapus fitur lama atau mengganti data karakter asli.
+7. Jalankan lint, typecheck, dan build. Perbaiki semua error.
+8. Berikan ringkasan file yang diubah, fitur yang benar-benar selesai, fitur yang masih placeholder, serta hasil build.
+
+KERJAKAN BERTAHAP
+Tahap 1: audit struktur dan integrasikan opening/title screen + rename.
+Tahap 2: redesign scene visual isometric.
+Tahap 3: bangun farming world interaction + land expansion.
+Tahap 4: bangun fishing pond + minigame.
+Tahap 5: bangun wardrobe 3D + skin system.
+Tahap 6: quest, achievement, save migration, optimasi, test.
+Jangan berhenti setelah membuat mockup atau halaman menu. Implementasikan interaksi di world scene.

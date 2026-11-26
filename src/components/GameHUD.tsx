@@ -1,18 +1,19 @@
 import React from 'react';
 import {
   Award,
+  Backpack,
   BookOpen,
-  Calculator,
-  ClipboardCheck,
   Clock,
   CloudSun,
-  Compass,
+  Coins,
   GraduationCap,
-  Home,
+  Map as MapIcon,
   ScrollText,
   Settings,
+  Sprout,
   Stethoscope,
-  Users,
+  Store,
+  User,
   Volume2,
   VolumeX,
   ZoomIn,
@@ -20,29 +21,20 @@ import {
 } from 'lucide-react';
 import { AVATARS, WEATHER_INFO } from '../data/characters';
 import { AvatarId, WeatherType } from '../types/pharmacy';
+import { RpgTabId } from './VillageRpgShell';
 
-export type HudActionPage =
-  | 'home'
-  | 'quest'
-  | 'learn'
-  | 'medals'
-  | 'clinic'
-  | 'formulary'
-  | 'calculator'
-  | 'quiz'
-  | 'character'
-  | 'settings';
+export type HudActionPage = RpgTabId | 'home' | 'learn' | 'clinic';
 
 interface GameHUDProps {
   selectedAvatar: AvatarId;
   xp: number;
+  coins: number;
   rankTitle: string;
   completedCount: number;
   totalCases: number;
-  unlockedMedalsCount: number;
-  totalMedalsCount: number;
   weather: WeatherType;
   isMuted: boolean;
+  claimableDailyCount?: number;
   dailyTipTitle: string;
   dailyTipDrugName: string;
   onNavigate: (page: HudActionPage) => void;
@@ -53,16 +45,29 @@ interface GameHUDProps {
   onToggleMute: () => void;
 }
 
+const LeafAccentSvg: React.FC<{ className?: string }> = ({ className = '' }) => (
+  <svg viewBox="0 0 24 20" fill="none" aria-hidden="true" className={className}>
+    <path
+      d="M3 15C3 8 9 3 18 4C16 11 11 16 3 15Z"
+      fill="#76B947"
+      stroke="#2E561D"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+    <path d="M5 14C9 10 12 8 16 5" stroke="#2E561D" strokeWidth="1.3" strokeLinecap="round" />
+  </svg>
+);
+
 export const GameHUD: React.FC<GameHUDProps> = ({
   selectedAvatar,
   xp,
+  coins,
   rankTitle,
   completedCount,
   totalCases,
-  unlockedMedalsCount,
-  totalMedalsCount,
   weather,
   isMuted,
+  claimableDailyCount = 0,
   dailyTipTitle,
   dailyTipDrugName,
   onNavigate,
@@ -75,6 +80,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const avatar = AVATARS.find((a) => a.id === selectedAvatar) || AVATARS[0];
   const pendingCount = Math.max(0, totalCases - completedCount);
 
+  // Clean 3-tile Left Rail (Adventure & Exploration)
   const leftItems: {
     page: HudActionPage;
     label: string;
@@ -83,22 +89,23 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   }[] = [
     {
       page: 'quest',
-      label: 'Pasien',
+      label: 'Jurnal',
       icon: <ScrollText className="w-5 h-5 text-[#FFE59E]" />,
       badge: pendingCount > 0 ? pendingCount : undefined,
     },
     {
-      page: 'learn',
-      label: 'Belajar',
-      icon: <GraduationCap className="w-5 h-5 text-[#A7F3D0]" />,
+      page: 'map',
+      label: 'Peta',
+      icon: <MapIcon className="w-5 h-5 text-[#A7F3D0]" />,
     },
     {
-      page: 'medals',
-      label: 'Medali',
-      icon: <Award className="w-5 h-5 text-[#FFD166]" />,
+      page: 'inventory',
+      label: 'Tas',
+      icon: <Backpack className="w-5 h-5 text-[#FDE68A]" />,
     },
   ];
 
+  // Clean 3-tile Right Rail (Clinic, Encyclopedia, Village Trade)
   const rightItems: {
     page: HudActionPage;
     label: string;
@@ -110,95 +117,102 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       icon: <Stethoscope className="w-5 h-5 text-[#FCA5A5]" />,
     },
     {
-      page: 'formulary',
-      label: 'Buku Obat',
-      icon: <BookOpen className="w-5 h-5 text-[#FDE68A]" />,
+      page: 'herbal',
+      label: 'Herbal',
+      icon: <Sprout className="w-5 h-5 text-[#86EFAC]" />,
     },
     {
-      page: 'calculator',
-      label: 'Kalkulator',
-      icon: <Calculator className="w-5 h-5 text-[#BAE6FD]" />,
-    },
-    {
-      page: 'quiz',
-      label: 'Quiz',
-      icon: <ClipboardCheck className="w-5 h-5 text-[#C4B5FD]" />,
+      page: 'shop',
+      label: 'Toko',
+      icon: <Store className="w-5 h-5 text-[#FFD166]" />,
     },
   ];
 
+  // Bottom Structured 5-Realm RPG Dock (1-2 clicks to all 13 RPG modules)
   const bottomItems: {
     page: HudActionPage;
     label: string;
     icon: React.ReactNode;
+    badge?: number;
   }[] = [
-    { page: 'home', label: 'Beranda', icon: <Home className="w-4 h-4 sm:w-5 sm:h-5" /> },
-    { page: 'character', label: 'Karakter', icon: <Users className="w-4 h-4 sm:w-5 sm:h-5" /> },
-    { page: 'quest', label: 'Peta Kasus', icon: <Compass className="w-4 h-4 sm:w-5 sm:h-5" /> },
-    { page: 'learn', label: 'Belajar', icon: <GraduationCap className="w-4 h-4 sm:w-5 sm:h-5" /> },
-    { page: 'settings', label: 'Menu', icon: <Settings className="w-4 h-4 sm:w-5 sm:h-5" /> },
+    { page: 'profile', label: 'Karakter', icon: <User className="w-4 h-4 sm:w-5 sm:h-5" /> },
+    {
+      page: claimableDailyCount > 0 ? 'daily' : 'quest',
+      label: 'Misi & Peta',
+      icon: <ScrollText className="w-4 h-4 sm:w-5 sm:h-5" />,
+      badge: claimableDailyCount > 0 ? claimableDailyCount : undefined,
+    },
+    { page: 'fishing', label: 'Koleksi', icon: <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" /> },
+    { page: 'achievement', label: 'Prestasi', icon: <Award className="w-4 h-4 sm:w-5 sm:h-5" /> },
+    { page: 'upgrade', label: 'Desa', icon: <Settings className="w-4 h-4 sm:w-5 sm:h-5" /> },
   ];
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between pt-safe pb-safe px-safe sm:pt-3.5 sm:pb-3.5 sm:px-3.5 select-none">
-      {/* TOP BAR: Responsive Two-Row Mobile Stack (<sm) -> Single-Row Desktop/Tablet (sm+) */}
+      {/* TOP BAR: Player Crest + Core RPG Stats + Compact Utility Strip */}
       <header className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-        {/* Top Row: Avatar Crest + (Desktop inline stats) + Quick Utility Controls */}
         <div className="flex items-center justify-between gap-2 w-full sm:w-auto sm:flex-1 min-w-0">
           <div className="pointer-events-auto flex items-center gap-1.5 sm:gap-2 min-w-0">
             <button
               type="button"
-              onClick={() => onNavigate('character')}
-              className="ask-wood-pill min-h-[40px] sm:min-h-[44px] pr-2.5 pl-1 py-0.5 sm:py-1 flex items-center gap-1.5 sm:gap-2 cursor-pointer min-w-0 shrink"
-              title="Ganti Avatar & Lihat Profil Tokoh"
+              onClick={() => onNavigate('profile')}
+              className="ask-wood-pill relative min-h-[42px] sm:min-h-[46px] pr-3 pl-1 py-0.5 sm:py-1 flex items-center gap-2 cursor-pointer min-w-0 shrink"
+              title="Buka Profil Karakter & Wardrobe"
             >
+              <LeafAccentSvg className="hidden sm:block absolute -top-1.5 -left-1.5 w-5 h-4 pointer-events-none" />
               <img
                 src={avatar.imagePath}
                 alt={avatar.name}
                 referrerPolicy="no-referrer"
-                className="w-7 h-7 sm:w-9 sm:h-9 rounded-full border-2 border-[#FFD166] object-cover bg-[#F2EFEB] shrink-0"
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-full border-2 border-[#FFD166] object-cover bg-[#F2EFEB] shrink-0"
               />
               <div className="text-left leading-tight min-w-0">
                 <div className="font-display font-bold text-base sm:text-lg text-[#FFF8E6] leading-none truncate">
                   {avatar.name}
                 </div>
-                <div className="font-sans text-[10px] font-semibold tracking-wide text-[#FFD166] truncate max-w-[96px] sm:max-w-[140px]">
+                <div className="font-sans text-[10px] font-semibold tracking-wide text-[#FFD166] truncate max-w-[100px] sm:max-w-[150px]">
                   {rankTitle}
                 </div>
               </div>
             </button>
 
-            {/* Desktop/Tablet Inline Stat Pills */}
+            <button
+              type="button"
+              onClick={() => onNavigate('home')}
+              className="hidden lg:inline-flex ask-wood-pill min-h-[40px] px-3.5 py-1.5 text-xs font-display font-bold tracking-wide items-center gap-1.5 cursor-pointer shrink-0"
+              title="Pusatkan Kamera ke Alun-Alun Kalarma Village"
+            >
+              <span className="text-[#FFE39A]">Kalarma Village</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onNavigate('shop')}
+              className="hidden sm:inline-flex ask-wood-pill min-h-[40px] px-3 py-1.5 text-xs font-mono font-bold tabular-nums items-center gap-1.5 cursor-pointer shrink-0"
+              title="Saldo Koin Daun (Buka Toko Desa)"
+            >
+              <Coins className="w-3.5 h-3.5 text-[#FFD166]" />
+              <span>{coins}</span>
+            </button>
+
             <button
               type="button"
               onClick={() => onNavigate('quest')}
-              className="hidden sm:inline-flex ask-wood-pill min-h-[40px] px-3 py-1.5 text-xs font-sans font-bold tabular-nums items-center gap-1.5 cursor-pointer shrink-0"
+              className="hidden md:inline-flex ask-wood-pill min-h-[40px] px-3 py-1.5 text-xs font-mono font-bold tabular-nums items-center gap-1.5 cursor-pointer shrink-0"
               title="Progres Pasien Sembuh"
             >
               <span className="text-[#86EFAC]">♥</span>
               <span>
                 {completedCount}/{totalCases}
               </span>
-            </button>
-
-            <div className="hidden sm:inline-flex ask-wood-pill min-h-[40px] px-3 py-1.5 text-xs font-sans font-bold tabular-nums items-center gap-1 shrink-0">
-              <span className="text-[#FFD166]">★</span>
-              <span>{xp} XP</span>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => onNavigate('medals')}
-              className="hidden md:inline-flex ask-wood-pill min-h-[40px] px-3 py-1.5 text-xs font-sans font-bold tabular-nums items-center gap-1.5 cursor-pointer shrink-0"
-              title="Lihat Medali Apoteker"
-            >
-              <Award className="w-3.5 h-3.5 text-[#FFD166]" />
-              <span>
-                {unlockedMedalsCount}/{totalMedalsCount}
+              <span aria-hidden="true" className="text-[#E8BC74]/70">
+                ·
               </span>
+              <span className="text-[#FFD166]">{xp} XP</span>
             </button>
           </div>
 
-          {/* Right Utility Controls (Compact 36px on mobile so it never overlaps Avatar Crest) */}
+          {/* Right Utility Strip */}
           <div className="pointer-events-auto flex items-center gap-1 sm:gap-1.5 shrink-0">
             <button
               type="button"
@@ -259,7 +273,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               type="button"
               onClick={() => onNavigate('settings')}
               className="ask-wood-pill min-h-[36px] min-w-[36px] sm:min-h-[40px] sm:min-w-[40px] p-1.5 sm:p-2 inline-flex items-center justify-center cursor-pointer"
-              title="Menu & Pengaturan"
+              title="Pengaturan Desa & Grafis"
               aria-label="Buka menu pengaturan"
             >
               <Settings className="w-4 h-4 text-[#FFD166]" />
@@ -267,13 +281,21 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </div>
         </div>
 
-        {/* Mobile-Only Second Tier Stats Strip (Guarantees Zero Overlap on 320px–430px iOS/Android) */}
+        {/* Mobile Compact Stats Strip */}
         <div className="pointer-events-auto flex sm:hidden items-center gap-1.5 flex-wrap">
           <button
             type="button"
+            onClick={() => onNavigate('shop')}
+            className="ask-wood-pill min-h-[34px] px-2.5 py-0.5 text-xs font-mono font-bold tabular-nums inline-flex items-center gap-1 cursor-pointer"
+          >
+            <Coins className="w-3.5 h-3.5 text-[#FFD166]" />
+            <span>{coins}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => onNavigate('quest')}
-            className="ask-wood-pill min-h-[36px] px-2.5 py-1 text-xs font-sans font-bold tabular-nums inline-flex items-center gap-1 cursor-pointer"
-            title="Progres Pasien Sembuh"
+            className="ask-wood-pill min-h-[34px] px-2.5 py-0.5 text-xs font-mono font-bold tabular-nums inline-flex items-center gap-1 cursor-pointer"
           >
             <span className="text-[#86EFAC]">♥</span>
             <span>
@@ -281,38 +303,25 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </span>
           </button>
 
-          <div className="ask-wood-pill min-h-[36px] px-2.5 py-1 text-xs font-sans font-bold tabular-nums inline-flex items-center gap-1">
+          <span className="ask-wood-pill min-h-[34px] px-2.5 py-0.5 text-xs font-mono font-bold tabular-nums inline-flex items-center gap-1">
             <span className="text-[#FFD166]">★</span>
             <span>{xp} XP</span>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => onNavigate('medals')}
-            className="ask-wood-pill min-h-[36px] px-2.5 py-1 text-xs font-sans font-bold tabular-nums inline-flex items-center gap-1 cursor-pointer"
-            title="Lihat Medali Apoteker"
-          >
-            <Award className="w-3.5 h-3.5 text-[#FFD166]" />
-            <span>
-              {unlockedMedalsCount}/{totalMedalsCount}
-            </span>
-          </button>
+          </span>
         </div>
       </header>
 
-      {/* MIDDLE ROW: Left & Right Floating Cozy Action Rails */}
+      {/* MIDDLE ROW: Uncluttered 3-Tile Wooden Quick Rails */}
       <div className="flex-1 relative min-h-0 flex items-start justify-between pt-2 sm:pt-4">
-        {/* Left Action Rail */}
-        <aside className="pointer-events-auto flex flex-col gap-1.5 sm:gap-2" aria-label="Menu Cepat Kiri">
+        <aside className="pointer-events-auto flex flex-col gap-2" aria-label="Navigasi Petualangan">
           {leftItems.map((item) => (
             <button
               key={item.page}
               type="button"
               onClick={() => onNavigate(item.page)}
-              className="ask-wood-tile relative w-[54px] sm:w-[70px] min-h-[48px] sm:min-h-[60px] px-1 py-1 sm:py-1.5 flex flex-col items-center justify-center gap-0.5 sm:gap-1 cursor-pointer"
+              className="ask-wood-tile relative w-[56px] sm:w-[70px] min-h-[50px] sm:min-h-[60px] px-1 py-1 sm:py-1.5 flex flex-col items-center justify-center gap-0.5 sm:gap-1 cursor-pointer"
             >
               {item.badge !== undefined && (
-                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] sm:min-w-[20px] h-[18px] sm:h-5 px-1 rounded-full bg-[#FF5A5F] border-2 border-[#FFF8E6] text-[9px] sm:text-[10px] font-sans font-extrabold text-white flex items-center justify-center tabular-nums">
+                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] sm:min-w-[20px] h-[18px] sm:h-5 px-1 rounded-full bg-[#FF5A5F] border-2 border-[#FFF8E6] text-[9px] sm:text-[10px] font-mono font-extrabold text-white flex items-center justify-center tabular-nums">
                   {item.badge}
                 </span>
               )}
@@ -324,14 +333,13 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           ))}
         </aside>
 
-        {/* Right Action Rail */}
-        <aside className="pointer-events-auto flex flex-col gap-1.5 sm:gap-2" aria-label="Menu Cepat Kanan">
+        <aside className="pointer-events-auto flex flex-col gap-2" aria-label="Navigasi Desa">
           {rightItems.map((item) => (
             <button
               key={item.page}
               type="button"
               onClick={() => onNavigate(item.page)}
-              className="ask-wood-tile w-[54px] sm:w-[70px] min-h-[48px] sm:min-h-[60px] px-1 py-1 sm:py-1.5 flex flex-col items-center justify-center gap-0.5 sm:gap-1 cursor-pointer"
+              className="ask-wood-tile w-[56px] sm:w-[70px] min-h-[50px] sm:min-h-[60px] px-1 py-1 sm:py-1.5 flex flex-col items-center justify-center gap-0.5 sm:gap-1 cursor-pointer"
             >
               <span className="scale-90 sm:scale-100">{item.icon}</span>
               <span className="font-sans text-[10px] sm:text-[11px] font-bold tracking-tight leading-none text-[#FFF8E6] whitespace-nowrap">
@@ -342,9 +350,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </aside>
       </div>
 
-      {/* BOTTOM SECTION: Compact Daily Tip Banner (md+) + Cozy 5-Button Navigation Dock */}
+      {/* BOTTOM DOCK: Compact Daily Clinical Tip + 5 Structured Wooden Menu Buttons */}
       <div className="flex flex-col items-center gap-2">
-        {/* Parchment Mission / Daily Clinical Tip Pill (Desktop & Tablet so it never covers mobile joystick) */}
         <button
           type="button"
           onClick={() => onNavigate('learn')}
@@ -358,12 +365,12 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               {dailyTipDrugName}
             </div>
           </div>
-          <span className="font-sans text-[11px] font-bold bg-[#6E4021] text-[#FFF8E6] px-3 py-1.5 rounded-lg shrink-0">
-            Mode Belajar →
+          <span className="font-sans text-[11px] font-bold bg-[#6E4021] text-[#FFF8E6] px-3 py-1.5 rounded-lg inline-flex items-center gap-1 shrink-0">
+            <GraduationCap className="w-3.5 h-3.5" />
+            <span>Mode Belajar</span>
           </span>
         </button>
 
-        {/* Bottom Cozy Wooden Dock (5 main navigation actions) */}
         <nav
           aria-label="Navigasi Utama Dalam Game"
           className="pointer-events-auto w-full max-w-xl grid grid-cols-5 gap-1 sm:gap-2.5"
@@ -373,8 +380,13 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               key={item.label}
               type="button"
               onClick={() => onNavigate(item.page)}
-              className="ask-wood-tile min-h-[48px] sm:min-h-[56px] px-0.5 sm:px-1 py-1 sm:py-1.5 flex flex-col items-center justify-center gap-0.5 sm:gap-1 cursor-pointer"
+              className="ask-wood-tile relative min-h-[48px] sm:min-h-[56px] px-0.5 sm:px-1 py-1 sm:py-1.5 flex flex-col items-center justify-center gap-0.5 sm:gap-1 cursor-pointer"
             >
+              {item.badge !== undefined && (
+                <span className="absolute -top-1.5 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#16A34A] border-2 border-[#FFF8E6] text-[9px] font-mono font-extrabold text-white flex items-center justify-center tabular-nums">
+                  {item.badge}
+                </span>
+              )}
               <span className="text-[#FFD166]">{item.icon}</span>
               <span className="font-sans text-[10px] sm:text-xs font-bold tracking-tight leading-none text-[#FFF8E6] truncate max-w-full">
                 {item.label}

@@ -2,12 +2,19 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import {
+  Building2,
   CheckCircle2,
   Clock,
   CloudRain,
+  Fish,
+  Hammer,
+  Home,
   MessageCircle,
   Moon,
+  Shirt,
+  Sprout,
   Stethoscope,
+  Store,
   Sun,
   Volume2,
   VolumeX,
@@ -20,18 +27,27 @@ import { CASES } from '../data/cases';
 import { AVATARS, CHARACTERS, WEATHER_INFO } from '../data/characters';
 import { AvatarId, CaseScenario, CharacterId, EmotionType, WeatherType } from '../types/pharmacy';
 import { villageAmbientAudio } from '../utils/ambientAudio';
+import { GraphicsQuality } from '../utils/saveSystem';
 import { soundFX } from '../utils/sound';
 import { ChibiCharacterRig, buildChibiCharacter3D } from '../three/dioramaCharacters';
 import { TimePhaseName, createDayNightLightingRig, getTimePhaseLabel } from '../three/dioramaLighting';
 import { createDioramaMaterials } from '../three/dioramaMaterials';
 import { createWeatherParticleSystem } from '../three/dioramaWeather';
+import { buildStylizedVegetationSystem } from '../three/dioramaVegetation';
 import {
   ColliderBox,
+  TreeSpeciesVariant,
+  VILLAGE_ROAD_SEGMENTS,
   buildApothecaryLOD,
   buildApothecaryPavilion,
   buildCentralFountain,
+  buildCharacterHouse,
+  buildCharacterHouseLOD,
   buildCliffWindmill,
+  buildExpansionZone,
   buildFloatingIsland,
+  buildHerbalGarden,
+  buildHerbalGardenLOD,
   buildHospitalBuilding,
   buildHospitalLOD,
   buildMarketStall,
@@ -41,12 +57,133 @@ import {
   buildSacredTreeLOD,
   buildTree3D,
   buildTreeLOD,
+  buildVillageSignposts,
+  buildVillageStreetLamps,
   buildVillagerCottage,
   buildVillagerCottageLOD,
+  buildWardrobeBoutique,
+  buildWardrobeBoutiqueLOD,
   buildWindmillLOD,
 } from '../three/dioramaProps';
 import { CharacterPortrait } from './CharacterPortrait';
 import { VirtualJoystick } from './VirtualJoystick';
+
+export type VisitableBuildingId =
+  | 'clinic'
+  | 'house'
+  | 'boutique'
+  | 'shop'
+  | 'garden'
+  | 'pond'
+  | 'expansion';
+
+export interface VisitableBuildingZone {
+  id: VisitableBuildingId;
+  name: string;
+  actionLabel: string;
+  centerX: number;
+  centerZ: number;
+  entranceX: number;
+  entranceZ: number;
+  proxyW: number;
+  proxyH: number;
+  proxyD: number;
+  ringColor: number;
+}
+
+export const VISITABLE_BUILDINGS: VisitableBuildingZone[] = [
+  {
+    id: 'clinic',
+    name: 'Klinik Desa Asklepios',
+    actionLabel: 'Masuk Klinik Desa',
+    centerX: 0,
+    centerZ: -15.0,
+    entranceX: 0,
+    entranceZ: -11.4,
+    proxyW: 9.2,
+    proxyH: 6.4,
+    proxyD: 5.8,
+    ringColor: 0x3b826e,
+  },
+  {
+    id: 'house',
+    name: 'Rumah Karakter',
+    actionLabel: 'Masuk Rumah Karakter',
+    centerX: -10.2,
+    centerZ: -14.2,
+    entranceX: -10.2,
+    entranceZ: -11.2,
+    proxyW: 4.5,
+    proxyH: 4.4,
+    proxyD: 4.0,
+    ringColor: 0x60a5fa,
+  },
+  {
+    id: 'boutique',
+    name: 'Butik Busana & Wardrobe',
+    actionLabel: 'Buka Butik Wardrobe',
+    centerX: 6.8,
+    centerZ: -6.2,
+    entranceX: 6.8,
+    entranceZ: -3.4,
+    proxyW: 4.6,
+    proxyH: 4.2,
+    proxyD: 4.0,
+    ringColor: 0xec4899,
+  },
+  {
+    id: 'shop',
+    name: 'Toko Perlengkapan & Apotek',
+    actionLabel: 'Buka Toko Perlengkapan',
+    centerX: 12.6,
+    centerZ: -2.6,
+    entranceX: 12.2,
+    entranceZ: 0.4,
+    proxyW: 5.6,
+    proxyH: 4.2,
+    proxyD: 5.0,
+    ringColor: 0xf59e0b,
+  },
+  {
+    id: 'garden',
+    name: 'Kebun Herbal Desa',
+    actionLabel: 'Kunjungi Kebun Herbal',
+    centerX: -10.6,
+    centerZ: 5.4,
+    entranceX: -7.4,
+    entranceZ: 5.4,
+    proxyW: 5.4,
+    proxyH: 2.2,
+    proxyD: 4.2,
+    ringColor: 0x4ade80,
+  },
+  {
+    id: 'pond',
+    name: 'Kolam Pemancingan',
+    actionLabel: 'Dermaga Kolam Pancing',
+    centerX: 2.45,
+    centerZ: 3.1,
+    entranceX: 2.45,
+    entranceZ: 3.3,
+    proxyW: 2.4,
+    proxyH: 1.6,
+    proxyD: 2.6,
+    ringColor: 0x38bdf8,
+  },
+  {
+    id: 'expansion',
+    name: 'Area Perluasan Lahan',
+    actionLabel: 'Lihat Perluasan Lahan',
+    centerX: 14.0,
+    centerZ: 11.4,
+    entranceX: 11.3,
+    entranceZ: 11.4,
+    proxyW: 4.5,
+    proxyH: 1.8,
+    proxyD: 3.4,
+    ringColor: 0xd97706,
+  },
+];
 
 interface VillageDiorama3DProps {
   selectedAvatar: AvatarId;
@@ -55,9 +192,16 @@ interface VillageDiorama3DProps {
   completedCases: string[];
   activeCaseId?: string | null;
   onSelectCase: (scenario: CaseScenario) => void;
+  onInteractBuilding?: (buildingId: VisitableBuildingId) => void;
+  graphicsQuality?: GraphicsQuality;
+  equippedOutfitId?: string | null;
+  equippedSkinId?: string | null;
+  equippedAccessoryId?: string | null;
+  unlockedExpansions?: string[];
   timeStepTrigger?: number;
   zoomTrigger?: { dir: 1 | -1; seq: number };
   focusHubTrigger?: number;
+  navigateToBuilding?: { buildingId: VisitableBuildingId; seq: number } | null;
   embeddedInHud?: boolean;
   viewportSectionRef?: React.RefObject<HTMLDivElement | null>;
 }
@@ -147,7 +291,7 @@ const NPC_STATIONS: NpcStation[] = [
   // 10 Villager Patients spaced across the expanded village neighborhoods
   { id: 'koko', x: -14.2, z: -10.8, rotY: 0.4, caseId: 'case-koko' },
   { id: 'geri', x: 14.2, z: -10.8, rotY: -0.4, caseId: 'case-geri' },
-  { id: 'mimi', x: -14.2, z: 1.4, rotY: 0.8, caseId: 'case-mimi' },
+  { id: 'mimi', x: -14.4, z: -0.35, rotY: 0.55, caseId: 'case-mimi' },
   { id: 'nino', x: 5.8, z: 13.4, rotY: -0.2, caseId: 'case-nino' },
   { id: 'riko', x: 14.4, z: 7.2, rotY: -0.8, caseId: 'case-riko' },
   { id: 'bobi', x: 13.8, z: 14.8, rotY: -0.6, caseId: 'case-bobi' },
@@ -167,18 +311,42 @@ const _frustum = new THREE.Frustum();
 const _cullSphere = new THREE.Sphere();
 
 function groundHeightAt(x: number, z: number): number {
-  // Raised arch over the central stone bridge at x in [-1.4, 1.4], z in [-0.9, 4.1]
+  // Raised arch over the central stone bridge at x in [-1.45, 1.45], z in [-0.9, 4.1]
   if (Math.abs(x) <= 1.45 && z >= -0.9 && z <= 4.1) {
     const t = (z - 1.6) / 2.5;
     return Math.max(0, Math.cos(t * (Math.PI / 2)) * 0.62 + 0.16);
   }
-  // Gentle arch over the eastern weathered wooden plank bridge at x in [3.5, 5.1], z in [-0.9, 4.1]
+  // Wooden Fishing Pier deck at x in [1.82, 3.08], z in [2.25, 4.55]
+  if (Math.abs(x - 2.45) <= 0.63 && z >= 2.25 && z <= 4.55) {
+    return 0.27;
+  }
+  // Eastern pond wooden plank bridge at x in [3.5, 5.1], z in [-0.9, 4.1]
   if (Math.abs(x - 4.3) <= 0.78 && z >= -0.9 && z <= 4.1) {
     const t = (z - 1.6) / 2.5;
-    return Math.max(0, Math.cos(t * (Math.PI / 2)) * 0.2 + 0.18);
+    return Math.max(0, Math.cos(t * (Math.PI / 2)) * 0.22 + 0.18);
+  }
+  // East river stream wooden bridge at x in [11.4, 13.0], z in [0.15, 3.05]
+  if (Math.abs(x - 12.2) <= 0.78 && z >= 0.15 && z <= 3.05) {
+    const t = (z - 1.6) / 1.45;
+    return Math.max(0, Math.cos(t * (Math.PI / 2)) * 0.22 + 0.18);
+  }
+  // West river stream wooden bridge at x in [-12.3, -10.7], z in [1.15, 4.05]
+  if (Math.abs(x + 11.5) <= 0.78 && z >= 1.15 && z <= 4.05) {
+    const t = (z - 2.6) / 1.45;
+    return Math.max(0, Math.cos(t * (Math.PI / 2)) * 0.22 + 0.18);
   }
   return 0;
 }
+
+const BUILDING_ACTION_ICONS: Record<VisitableBuildingId, React.ReactNode> = {
+  clinic: <Building2 className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />,
+  house: <Home className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />,
+  boutique: <Shirt className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />,
+  shop: <Store className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />,
+  garden: <Sprout className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />,
+  pond: <Fish className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />,
+  expansion: <Hammer className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />,
+};
 
 export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
   selectedAvatar,
@@ -187,9 +355,16 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
   completedCases,
   activeCaseId = null,
   onSelectCase,
+  onInteractBuilding,
+  graphicsQuality = 'medium',
+  equippedOutfitId = 'classic_coat',
+  equippedSkinId = null,
+  equippedAccessoryId = null,
+  unlockedExpansions = [],
   timeStepTrigger = 0,
   zoomTrigger,
   focusHubTrigger = 0,
+  navigateToBuilding = null,
   embeddedInHud = false,
   viewportSectionRef,
 }) => {
@@ -201,6 +376,10 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
   const activeCaseIdRef = useRef<string | null>(activeCaseId);
   const talkingNpcIdRef = useRef<CharacterId | null>(null);
   const avatarRef = useRef<AvatarId>(selectedAvatar);
+  const outfitRef = useRef<string | null>(equippedOutfitId);
+  const skinRef = useRef<string | null>(equippedSkinId);
+  const accessoryRef = useRef<string | null>(equippedAccessoryId);
+  const unlockedExpansionsRef = useRef<string[]>(unlockedExpansions);
   const zoomRef = useRef<number>(1.0);
   const dayPhaseRef = useRef<number>((0.08 + (completedCases.length % 7) * 0.08) % 1);
   const targetPhaseRef = useRef<number | null>(null);
@@ -215,6 +394,7 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
     speed: 6.8,
     autoTarget: null as { x: number; z: number } | null,
     autoInteractNpcId: null as CharacterId | null,
+    autoInteractBuildingId: null as VisitableBuildingId | null,
   });
 
   const keysRef = useRef<Record<string, boolean>>({});
@@ -225,8 +405,11 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
   });
 
   const [nearbyNpc, setNearbyNpc] = useState<NpcStation | null>(null);
+  const [nearbyBuilding, setNearbyBuilding] = useState<VisitableBuildingZone | null>(null);
   const [mentorBubble, setMentorBubble] = useState<{ id: CharacterId; text: string } | null>(null);
   const [ambientMuted, setAmbientMuted] = useState(() => villageAmbientAudio.isLocalMuted());
+  const [sceneReady, setSceneReady] = useState(false);
+  const [contextLost, setContextLost] = useState(false);
   const [timePhaseLabel, setTimePhaseLabel] = useState<TimePhaseName>(() =>
     weather === WeatherType.KABUT_MALAM
       ? 'Malam Tenang'
@@ -237,6 +420,11 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
   useEffect(() => {
     onSelectCaseRef.current = onSelectCase;
   }, [onSelectCase]);
+
+  const onInteractBuildingRef = useRef(onInteractBuilding);
+  useEffect(() => {
+    onInteractBuildingRef.current = onInteractBuilding;
+  }, [onInteractBuilding]);
 
   useEffect(() => {
     weatherRef.current = weather;
@@ -264,6 +452,22 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
   }, [selectedAvatar]);
 
   useEffect(() => {
+    outfitRef.current = equippedOutfitId;
+  }, [equippedOutfitId]);
+
+  useEffect(() => {
+    skinRef.current = equippedSkinId;
+  }, [equippedSkinId]);
+
+  useEffect(() => {
+    accessoryRef.current = equippedAccessoryId;
+  }, [equippedAccessoryId]);
+
+  useEffect(() => {
+    unlockedExpansionsRef.current = unlockedExpansions;
+  }, [unlockedExpansions]);
+
+  useEffect(() => {
     if (timeStepTrigger <= 0) return;
     const cur = dayPhaseRef.current;
     const stops = [0.08, 0.28, 0.56, 0.82];
@@ -284,8 +488,18 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
     if (focusHubTrigger <= 0) return;
     playerStateRef.current.autoTarget = { x: 0, z: -2.2 };
     playerStateRef.current.autoInteractNpcId = null;
+    playerStateRef.current.autoInteractBuildingId = null;
     zoomRef.current = 1.0;
   }, [focusHubTrigger]);
+
+  useEffect(() => {
+    if (!navigateToBuilding || navigateToBuilding.seq <= 0) return;
+    const zone = VISITABLE_BUILDINGS.find((b) => b.id === navigateToBuilding.buildingId);
+    if (!zone) return;
+    playerStateRef.current.autoTarget = { x: zone.entranceX, z: zone.entranceZ };
+    playerStateRef.current.autoInteractNpcId = null;
+    playerStateRef.current.autoInteractBuildingId = null;
+  }, [navigateToBuilding]);
 
   const interactWithStation = (station: NpcStation) => {
     soundFX.playClick();
@@ -305,6 +519,9 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
   triggerRef.current = () => {
     if (nearbyNpc) {
       interactWithStation(nearbyNpc);
+    } else if (nearbyBuilding) {
+      soundFX.playClick();
+      onInteractBuildingRef.current?.(nearbyBuilding.id);
     }
   };
 
@@ -316,6 +533,7 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
     if (active && (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05)) {
       playerStateRef.current.autoTarget = null;
       playerStateRef.current.autoInteractNpcId = null;
+      playerStateRef.current.autoInteractBuildingId = null;
     }
   };
 
@@ -346,6 +564,7 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
         keysRef.current[k] = true;
         playerStateRef.current.autoTarget = null;
         playerStateRef.current.autoInteractNpcId = null;
+        playerStateRef.current.autoInteractBuildingId = null;
       }
       if (k === 'e' || e.code === 'Space') {
         if (tag !== 'BUTTON') {
@@ -399,18 +618,27 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
     })();
     const { isSoftwareGl, isConstrainedGpu } = gpuProfile;
 
+    const isLowQuality = graphicsQuality === 'low' || isSoftwareGl;
+    const effectiveConstrained = isConstrainedGpu || graphicsQuality === 'low';
+    const enablePointLights = graphicsQuality === 'medium' && !isSoftwareGl;
+
     const renderer = new THREE.WebGLRenderer({
-      antialias: !isConstrainedGpu,
+      antialias: graphicsQuality === 'medium' && !isConstrainedGpu,
       powerPreference: 'high-performance',
     });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.12;
     renderer.setPixelRatio(
-      isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, isConstrainedGpu ? 1.25 : 1.75)
+      isSoftwareGl
+        ? 1
+        : graphicsQuality === 'low'
+          ? 1
+          : Math.min(window.devicePixelRatio, isConstrainedGpu ? 1.25 : 1.65)
     );
     renderer.shadowMap.enabled = !isSoftwareGl;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type =
+      graphicsQuality === 'low' ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 
     const initW = container.clientWidth || 900;
     const initH = container.clientHeight || 520;
@@ -444,7 +672,7 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
       160
     );
     const camOffset = new THREE.Vector3(26, 21.2, 26);
-    const camLookTarget = new THREE.Vector3(0, 0.5, -2.2);
+    const camLookTarget = new THREE.Vector3(playerStateRef.current.x * 0.85, 0.5, playerStateRef.current.z * 0.85);
     camera.position.copy(camLookTarget).add(camOffset);
     camera.lookAt(camLookTarget);
 
@@ -455,7 +683,7 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
     const sunLight = new THREE.DirectionalLight(0xfff4d6, 1.45);
     sunLight.position.set(18, 28, 16);
     sunLight.castShadow = !isSoftwareGl;
-    const shadowSize = isConstrainedGpu ? 768 : 1024;
+    const shadowSize = graphicsQuality === 'low' ? 512 : isConstrainedGpu ? 768 : 1024;
     sunLight.shadow.mapSize.width = shadowSize;
     sunLight.shadow.mapSize.height = shadowSize;
     sunLight.shadow.camera.near = 2;
@@ -466,21 +694,21 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
     sunLight.shadow.camera.bottom = -29;
     sunLight.shadow.bias = -0.0005;
     sunLight.shadow.normalBias = 0.02;
-    sunLight.shadow.radius = isConstrainedGpu ? 1.5 : 2.5;
+    sunLight.shadow.radius = graphicsQuality === 'low' ? 1.0 : isConstrainedGpu ? 1.5 : 2.5;
     scene.add(sunLight);
 
     const fillLight = new THREE.DirectionalLight(0xbbe0e8, 0.38);
     fillLight.position.set(-14, 10, -12);
     scene.add(fillLight);
 
-    // Subtle back rim light for realistic silhouette separation on characters & foliage
+    // Subtle back rim light for silhouette separation on characters & foliage
     const rimLight = new THREE.DirectionalLight(0xfff1d6, 0.32);
     rimLight.position.set(-12, 16, -18);
     scene.add(rimLight);
 
     // Build Diorama Materials & World
-    const maxAnisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
-    const mats = createDioramaMaterials(maxAnisotropy, isConstrainedGpu);
+    const maxAnisotropy = graphicsQuality === 'low' ? 1 : Math.min(4, renderer.capabilities.getMaxAnisotropy());
+    const mats = createDioramaMaterials(maxAnisotropy, effectiveConstrained);
     const island = buildFloatingIsland(mats);
     scene.add(island);
 
@@ -489,6 +717,8 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
     const lanternBulbs: THREE.Mesh[] = [];
     const colliders: ColliderBox[] = [];
     const clickableProxies: THREE.Mesh[] = [];
+    const buildingProxies: THREE.Mesh[] = [];
+    const buildingShadowAnchors: Array<{ x: number; z: number; radiusX: number; radiusZ: number }> = [];
 
     interface LodEntry {
       lod: THREE.LOD;
@@ -522,57 +752,106 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
       return lod;
     };
 
-    // 1. Hospital & Clinic Utama Asklepios (North)
+    // 1. Klinik Desa Utama Asklepios (North)
     const hospitalHigh = buildHospitalBuilding(mats, windowMeshes);
     const hospitalLow = buildHospitalLOD(mats);
-    const hospitalLod = registerLod(hospitalHigh, hospitalLow, 8.0, isConstrainedGpu ? 19.0 : 23.0);
+    const hospitalLod = registerLod(hospitalHigh, hospitalLow, 8.0, effectiveConstrained ? 18.0 : 23.0);
     hospitalLod.position.set(0, 0, -15.0);
     scene.add(hospitalLod);
-    colliders.push({ id: 'hospital', label: 'RS Utama Asklepios', x: 0, z: -15.0, halfW: 4.5, halfD: 2.8 });
+    colliders.push({ id: 'hospital', label: 'Klinik Desa Asklepios', x: 0, z: -15.0, halfW: 4.5, halfD: 2.8 });
+    buildingShadowAnchors.push({ x: 0, z: -15.0, radiusX: 5.5, radiusZ: 3.4 });
 
-    // 2. Paviliun Herbal & Apotek Guru Lios (East beside pond)
-    const pavilionHigh = buildApothecaryPavilion(mats, lanternLights, lanternBulbs);
+    // 2. Rumah Karakter Utama (North-West Plaza)
+    const charHouseHigh = buildCharacterHouse(mats, windowMeshes, lanternLights, lanternBulbs, enablePointLights);
+    const charHouseLow = buildCharacterHouseLOD(mats);
+    const charHouseLod = registerLod(charHouseHigh, charHouseLow, 5.5, effectiveConstrained ? 17.0 : 20.5);
+    charHouseLod.position.set(-10.2, 0, -14.2);
+    charHouseLod.rotation.y = 0.18;
+    scene.add(charHouseLod);
+    colliders.push({ id: 'house', label: 'Rumah Karakter', x: -10.2, z: -14.2, halfW: 2.2, halfD: 1.9 });
+    buildingShadowAnchors.push({ x: -10.2, z: -14.2, radiusX: 2.8, radiusZ: 2.4 });
+
+    // 2b. Butik Busana & Wardrobe Kalarma (North-East Plaza)
+    const boutiqueHigh = buildWardrobeBoutique(mats, windowMeshes, lanternBulbs);
+    const boutiqueLow = buildWardrobeBoutiqueLOD(mats);
+    const boutiqueLod = registerLod(boutiqueHigh, boutiqueLow, 5.6, effectiveConstrained ? 17.0 : 20.5);
+    boutiqueLod.position.set(6.8, 0, -6.2);
+    scene.add(boutiqueLod);
+    colliders.push({ id: 'boutique', label: 'Butik Busana Kalarma', x: 6.8, z: -6.2, halfW: 2.3, halfD: 2.0 });
+    buildingShadowAnchors.push({ x: 6.8, z: -6.2, radiusX: 2.9, radiusZ: 2.5 });
+
+    // 3. Toko Perlengkapan & Apotek Guru Lios (East beside pond)
+    const pavilionHigh = buildApothecaryPavilion(mats, lanternLights, lanternBulbs, enablePointLights);
     const pavilionLow = buildApothecaryLOD(mats);
-    const pavilionLod = registerLod(pavilionHigh, pavilionLow, 6.0, isConstrainedGpu ? 18.0 : 21.5);
+    const pavilionLod = registerLod(pavilionHigh, pavilionLow, 6.0, effectiveConstrained ? 17.5 : 21.5);
     pavilionLod.position.set(12.6, 0, -2.6);
     scene.add(pavilionLod);
-    colliders.push({ id: 'pavilion', label: 'Apotek Guru Lios', x: 12.6, z: -2.6, halfW: 2.8, halfD: 2.5 });
+    colliders.push({ id: 'pavilion', label: 'Toko Perlengkapan', x: 12.6, z: -2.6, halfW: 2.8, halfD: 2.5 });
+    buildingShadowAnchors.push({ x: 12.6, z: -2.6, radiusX: 3.4, radiusZ: 3.0 });
 
-    // 3. Pond, Dual Bridges (Stone Arch + Plank Footbridge), Waterfall & Waterwheel Mill
+    // 4. Kebun Herbal Desa (West South Lawn)
+    const gardenHigh = buildHerbalGarden(mats);
+    const gardenLow = buildHerbalGardenLOD(mats);
+    const gardenLod = registerLod(gardenHigh, gardenLow, 5.2, effectiveConstrained ? 16.5 : 20.0);
+    gardenLod.position.set(-10.6, 0, 5.4);
+    scene.add(gardenLod);
+    colliders.push({ id: 'garden', label: 'Kebun Herbal', x: -10.6, z: 5.4, halfW: 2.55, halfD: 1.95 });
+    buildingShadowAnchors.push({ x: -10.6, z: 5.4, radiusX: 3.0, radiusZ: 2.3 });
+
+    // 5. Area Perluasan Lahan (South-East Plaza)
+    let activeExpansionKey = unlockedExpansionsRef.current.join(',');
+    let expansionGroup = buildExpansionZone(mats, unlockedExpansionsRef.current);
+    expansionGroup.position.set(14.0, 0, 11.4);
+    scene.add(expansionGroup);
+    colliders.push({ id: 'expansion', label: 'Area Perluasan Lahan', x: 14.0, z: 11.4, halfW: 2.15, halfD: 1.55 });
+    buildingShadowAnchors.push({ x: 14.0, z: 11.4, radiusX: 2.5, radiusZ: 1.9 });
+
+    // 6. Pond, Winding River, 4 Bridges, Fishing Pier + Swimming Fish, Waterfall & Waterwheel Mill
     const {
       group: pondGroup,
       waterMesh,
+      riverWestMesh,
+      riverEastMesh,
       boatGroup,
       waterwheelGroup,
       foamMeshes,
+      fishes,
     } = buildPondAndBridge(mats);
     scene.add(pondGroup);
-    colliders.push({ id: 'watermill-cliff', label: 'Kincir Air Sungai', x: -6.75, z: 1.6, halfW: 1.15, halfD: 1.45 });
+    colliders.push({ id: 'watermill-cliff', label: 'Kincir Air Sungai', x: -6.75, z: 0.65, halfW: 1.15, halfD: 1.2 });
 
-    // 3b. Central Village Stone Fountain Plaza
+    // 6b. Central Village Stone Fountain Plaza
     const { group: fountainGroup, spoutMesh: fountainSpout } = buildCentralFountain(mats);
     fountainGroup.position.set(0, 0, 8.8);
     scene.add(fountainGroup);
     colliders.push({ id: 'fountain', label: 'Air Mancur Desa', x: 0, z: 8.8, halfW: 1.05, halfD: 1.05 });
 
-    // 3c. Sacred Giant Ancient Herb Tree (North-East Plaza beside Clinic)
+    // 6c. Sacred Giant Ancient Herb Tree (North-East Plaza beside Clinic)
     const sacredHigh = buildSacredAncientTree(mats);
     const sacredLow = buildSacredTreeLOD(mats);
-    const sacredLod = registerLod(sacredHigh, sacredLow, 7.5, isConstrainedGpu ? 18.5 : 22.0, true);
+    const sacredLod = registerLod(sacredHigh, sacredLow, 7.5, effectiveConstrained ? 18.0 : 22.0, true);
     sacredLod.position.set(9.5, 0, -18.2);
     scene.add(sacredLod);
     colliders.push({ id: 'sacred-tree', label: 'Pohon Herbal Suci', x: 9.5, z: -18.2, halfW: 1.0, halfD: 1.0 });
+    buildingShadowAnchors.push({ x: 9.5, z: -18.2, radiusX: 2.4, radiusZ: 2.4 });
 
-    // 3d. Cliff Bluff Rotating Wooden Windmill (East Bluff)
+    // 6d. Cliff Bluff Rotating Wooden Windmill (East Bluff)
     const { group: windmillHigh, bladesGroup: windmillBlades } = buildCliffWindmill(mats);
     const windmillLow = buildWindmillLOD(mats);
-    const windmillLod = registerLod(windmillHigh, windmillLow, 6.5, isConstrainedGpu ? 19.0 : 22.5);
+    const windmillLod = registerLod(windmillHigh, windmillLow, 6.5, effectiveConstrained ? 18.5 : 22.5);
     windmillLod.position.set(19.8, 0, -2.5);
     windmillLod.rotation.y = -0.45;
     scene.add(windmillLod);
     colliders.push({ id: 'windmill', label: 'Kincir Angin Tebing', x: 19.8, z: -2.5, halfW: 1.45, halfD: 1.45 });
+    buildingShadowAnchors.push({ x: 19.8, z: -2.5, radiusX: 2.0, radiusZ: 2.0 });
 
-    // 4. Market Kiosks (South)
+    // 6e. Cozy Village Streetlamps & Directional Wooden Signposts
+    const streetLamps = buildVillageStreetLamps(mats, lanternBulbs);
+    scene.add(streetLamps);
+    const signposts = buildVillageSignposts(mats);
+    scene.add(signposts);
+
+    // 7. Market Kiosks (South)
     const stallSpecs: [number, number, number, THREE.MeshStandardMaterial][] = [
       [-7.8, 17.4, 0, mats.roofCoral],
       [0, 17.8, 0, mats.plasterSage],
@@ -581,14 +860,15 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
     stallSpecs.forEach(([sx, sz, ry, awn], idx) => {
       const stallHigh = buildMarketStall(mats, awn);
       const stallLow = buildMarketStallLOD(mats, awn);
-      const stallLod = registerLod(stallHigh, stallLow, 4.2, isConstrainedGpu ? 16.5 : 19.5);
+      const stallLod = registerLod(stallHigh, stallLow, 4.2, effectiveConstrained ? 16.0 : 19.5);
       stallLod.position.set(sx, 0, sz);
       stallLod.rotation.y = ry;
       scene.add(stallLod);
       colliders.push({ id: `stall-${idx}`, label: 'Kios Pasar Obat', x: sx, z: sz, halfW: 1.9, halfD: 1.1 });
+      buildingShadowAnchors.push({ x: sx, z: sz, radiusX: 2.2, radiusZ: 1.4 });
     });
 
-    // 5. Storybook Villager Cottages (mosaic pastel roofs, mailboxes & clotheslines)
+    // 8. Storybook Villager Cottages (mosaic pastel roofs, mailboxes & clotheslines)
     const cottageSpecs: [string, number, number, number, THREE.MeshStandardMaterial, boolean, boolean][] = [
       ['koko_house', -17.2, -13.5, 0.28, mats.roofTeal, true, false],
       ['geri_house', 17.2, -13.5, -0.28, mats.roofTerracotta, false, true],
@@ -601,42 +881,82 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
     cottageSpecs.forEach(([cid, cx, cz, ry, rMat, mailbox, clothesline]) => {
       const cottageHigh = buildVillagerCottage(mats, rMat, windowMeshes, mailbox, clothesline);
       const cottageLow = buildVillagerCottageLOD(mats, rMat);
-      const cottageLod = registerLod(cottageHigh, cottageLow, 4.8, isConstrainedGpu ? 17.0 : 20.0);
+      const cottageLod = registerLod(cottageHigh, cottageLow, 4.8, effectiveConstrained ? 16.5 : 20.0);
       cottageLod.position.set(cx, 0, cz);
       cottageLod.rotation.y = ry;
       scene.add(cottageLod);
       colliders.push({ id: cid, label: cid, x: cx, z: cz, halfW: 2.1, halfD: 1.9 });
+      buildingShadowAnchors.push({ x: cx, z: cz, radiusX: 2.6, radiusZ: 2.2 });
     });
 
-    // 6. Botanical & Blossom 3D Trees framing the spacious 52x52 island
-    const treeSpecs: [number, number, number, boolean][] = [
-      [-20.8, -18.5, 1.2, false],
-      [-10.2, -20.5, 1.0, true],
-      [4.8, -20.2, 0.95, true],
-      [15.2, -19.8, 1.1, false],
-      [20.6, -18.2, 1.15, true],
-      [-21.2, -8.0, 1.05, true],
-      [-21.4, 3.2, 1.1, false],
-      [21.2, -9.2, 1.05, false],
-      [21.4, 3.5, 1.0, true],
-      [-21.2, 12.5, 1.05, false],
-      [21.2, 12.5, 1.05, false],
-      [-20.5, 20.5, 1.15, true],
-      [-11.8, 20.8, 0.95, false],
-      [-3.8, 21.0, 0.95, true],
-      [4.2, 21.0, 0.95, false],
-      [20.5, 20.5, 1.15, true],
+    // 9. Stylized Rounded Trees (Oak, Fruit, Citrus, Blossom Pink & Cream, Conifer)
+    const treeSpecs: [number, number, number, TreeSpeciesVariant][] = [
+      [-20.8, -18.5, 1.2, 'oak'],
+      [-10.2, -20.5, 1.0, 'blossom'],
+      [4.8, -20.2, 0.95, 'blossomCream'],
+      [15.2, -19.8, 1.1, 'fruit'],
+      [20.6, -18.2, 1.15, 'blossom'],
+      [-21.2, -8.0, 1.05, 'citrus'],
+      [-21.4, 5.8, 1.1, 'conifer'],
+      [21.2, -9.2, 1.05, 'oak'],
+      [21.4, 4.5, 1.0, 'blossom'],
+      [-21.2, 12.5, 1.05, 'fruit'],
+      [21.2, 12.5, 1.05, 'conifer'],
+      [-20.5, 20.5, 1.15, 'blossomCream'],
+      [-11.8, 20.8, 0.95, 'fruit'],
+      [-3.8, 21.0, 0.95, 'blossom'],
+      [4.2, 21.0, 0.95, 'citrus'],
+      [20.5, 20.5, 1.15, 'blossom'],
+      [-14.2, -21.2, 0.92, 'citrus'],
+      [15.6, 20.8, 1.0, 'oak'],
     ];
-    treeSpecs.forEach(([tx, tz, sc, isBlossom]) => {
-      const treeHigh = buildTree3D(mats, isBlossom);
-      const treeLow = buildTreeLOD(mats, isBlossom);
-      const treeLod = registerLod(treeHigh, treeLow, 4.5 * sc, isConstrainedGpu ? 16.0 : 19.0, true);
+    treeSpecs.forEach(([tx, tz, sc, variant]) => {
+      const treeHigh = buildTree3D(mats, variant);
+      const treeLow = buildTreeLOD(mats, variant);
+      const treeLod = registerLod(treeHigh, treeLow, 4.5 * sc, effectiveConstrained ? 15.5 : 19.0, true);
       treeLod.position.set(tx, 0, tz);
       treeLod.scale.setScalar(sc);
       scene.add(treeLod);
     });
 
-    // 7. Tap-on-ground Target Ring Marker
+    // 10. Instanced Stylized Bushes, Grass Tufts, Wildflowers, Boulders, Stepping Stones & Soft AO
+    const vegetationSystem = buildStylizedVegetationSystem({
+      quality: isLowQuality ? 'low' : 'medium',
+      exclusionZones: colliders.map((c) => ({ x: c.x, z: c.z, halfW: c.halfW, halfD: c.halfD })),
+      roadSegments: VILLAGE_ROAD_SEGMENTS.map(([x, z, w, d, rotY]) => ({ x, z, w, d, rotY })),
+      treeAnchors: treeSpecs.map(([x, z, scale]) => ({ x, z, scale })),
+      buildingShadowAnchors,
+    });
+    scene.add(vegetationSystem.group);
+
+    // 11. Clickable Raycast Proxies & Subtle Entrance Markers for the 6 Visitable Buildings
+    const bProxyMat = new THREE.MeshBasicMaterial({ visible: false });
+    const entranceRingGeo = new THREE.RingGeometry(0.45, 0.62, 24);
+    entranceRingGeo.rotateX(-Math.PI / 2);
+    const entranceRings: Array<{ zone: VisitableBuildingZone; mesh: THREE.Mesh }> = [];
+
+    VISITABLE_BUILDINGS.forEach((b) => {
+      const bGeo = new THREE.BoxGeometry(b.proxyW, b.proxyH, b.proxyD);
+      const bProxy = new THREE.Mesh(bGeo, bProxyMat);
+      bProxy.position.set(b.centerX, b.proxyH * 0.5, b.centerZ);
+      bProxy.userData.buildingZone = b;
+      scene.add(bProxy);
+      buildingProxies.push(bProxy);
+
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: b.ringColor,
+        transparent: true,
+        opacity: 0.45,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const ring = new THREE.Mesh(entranceRingGeo, ringMat);
+      ring.position.set(b.entranceX, groundHeightAt(b.entranceX, b.entranceZ) + 0.04, b.entranceZ);
+      scene.add(ring);
+      entranceRings.push({ zone: b, mesh: ring });
+    });
+
+    // 12. Tap-on-ground Target Ring Marker
     const targetRing = new THREE.Mesh(
       new THREE.RingGeometry(0.32, 0.48, 24),
       new THREE.MeshBasicMaterial({ color: 0x2c6e63, side: THREE.DoubleSide, transparent: true, opacity: 0.85 })
@@ -676,14 +996,23 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
       });
     });
 
-    // 9. Active Player 3D Chibi Rig (swaps cleanly when selectedAvatar changes)
+    // 9. Active Player 3D Chibi Rig (swaps cleanly when selectedAvatar, skin, outfit, or accessory changes)
     let activePlayerId = avatarRef.current;
-    let playerRig = buildChibiCharacter3D(activePlayerId, null);
+    let activeOutfitId = outfitRef.current;
+    let activeSkinId = skinRef.current;
+    let activeAccessoryId = accessoryRef.current;
+    let playerRig = buildChibiCharacter3D(
+      activePlayerId,
+      null,
+      activeOutfitId,
+      activeSkinId,
+      activeAccessoryId
+    );
     playerRig.root.position.set(playerStateRef.current.x, 0, playerStateRef.current.z);
     scene.add(playerRig.root);
 
-    // 10. Dynamic Multi-Layer 3D Weather Particle System & Day-Dusk-Night Lighting Rig
-    const weatherSystem = createWeatherParticleSystem(isConstrainedGpu);
+    // 13. Dynamic Multi-Layer 3D Weather Particle System & Day-Dusk-Night Lighting Rig
+    const weatherSystem = createWeatherParticleSystem(isLowQuality);
     scene.add(weatherSystem.group);
     const lightingRig = createDayNightLightingRig();
 
@@ -692,7 +1021,7 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
       renderer.compile(scene, camera);
     }
 
-    // Raycaster Pointer Interaction (Click villager or ground)
+    // Raycaster Pointer Interaction (Click villager, building, or ground)
     const handlePointerTap = (e: PointerEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
       _mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -705,11 +1034,23 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
         const station = npcHits[0].object.userData.station as NpcStation | undefined;
         if (station) {
           soundFX.playClick();
-          // Walk to point in front of NPC and auto-open dialog on arrival
           const approachX = station.x + Math.sin(station.rotY) * 1.4;
           const approachZ = station.z + Math.cos(station.rotY) * 1.4;
           playerStateRef.current.autoTarget = { x: approachX, z: approachZ };
           playerStateRef.current.autoInteractNpcId = station.id;
+          playerStateRef.current.autoInteractBuildingId = null;
+          return;
+        }
+      }
+
+      const bHits = _raycaster.intersectObjects(buildingProxies, false);
+      if (bHits.length > 0) {
+        const zone = bHits[0].object.userData.buildingZone as VisitableBuildingZone | undefined;
+        if (zone) {
+          soundFX.playClick();
+          playerStateRef.current.autoTarget = { x: zone.entranceX, z: zone.entranceZ };
+          playerStateRef.current.autoInteractNpcId = null;
+          playerStateRef.current.autoInteractBuildingId = zone.id;
           return;
         }
       }
@@ -719,6 +1060,7 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
         const tz = THREE.MathUtils.clamp(_intersectPt.z, -23.5, 23.5);
         playerStateRef.current.autoTarget = { x: tx, z: tz };
         playerStateRef.current.autoInteractNpcId = null;
+        playerStateRef.current.autoInteractBuildingId = null;
       }
     };
 
@@ -733,11 +1075,40 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
     const ro = new ResizeObserver(syncSize);
     ro.observe(container);
 
-    // Animation Loop (with software-WebGL afterDraw pacing)
+    // Animation Loop (with software-WebGL afterDraw pacing + WebGL context loss safety)
     let frameId = 0;
     let disposed = false;
+    let isContextLost = false;
     const clock = new THREE.Clock();
     let uiTimer = 0;
+    let firstFrameSent = false;
+    let lastProjZoom = -1;
+    let lastProjAspect = -1;
+
+    const handleContextLost = (ev: Event) => {
+      ev.preventDefault();
+      isContextLost = true;
+      setContextLost(true);
+      cancelAnimationFrame(frameId);
+      clearTimeout(frameId);
+    };
+
+    const handleContextRestored = () => {
+      if (disposed) return;
+      isContextLost = false;
+      setContextLost(false);
+      lastProjZoom = -1;
+      lastProjAspect = -1;
+      clock.getDelta();
+      if (isSoftwareGl) {
+        frameId = window.setTimeout(tick, 0);
+      } else {
+        frameId = requestAnimationFrame(tick);
+      }
+    };
+
+    renderer.domElement.addEventListener('webglcontextlost', handleContextLost);
+    renderer.domElement.addEventListener('webglcontextrestored', handleContextRestored);
 
     function afterDraw(cb: () => void) {
       const gl = renderer.getContext() as WebGL2RenderingContext;
@@ -761,12 +1132,17 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
     }
 
     const tick = () => {
-      if (disposed) return;
+      if (disposed || isContextLost) return;
       const dt = Math.min(clock.getDelta(), 0.05);
       const elapsed = clock.elapsedTime;
 
-      // Swap player 3D rig if avatar changed
-      if (avatarRef.current !== activePlayerId) {
+      // Swap player 3D rig if avatar, wardrobe outfit, skin, or accessory changed
+      if (
+        avatarRef.current !== activePlayerId ||
+        outfitRef.current !== activeOutfitId ||
+        skinRef.current !== activeSkinId ||
+        accessoryRef.current !== activeAccessoryId
+      ) {
         scene.remove(playerRig.root);
         playerRig.root.traverse((obj) => {
           if (obj instanceof THREE.Mesh) {
@@ -777,8 +1153,30 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
           }
         });
         activePlayerId = avatarRef.current;
-        playerRig = buildChibiCharacter3D(activePlayerId, null);
+        activeOutfitId = outfitRef.current;
+        activeSkinId = skinRef.current;
+        activeAccessoryId = accessoryRef.current;
+        playerRig = buildChibiCharacter3D(
+          activePlayerId,
+          null,
+          activeOutfitId,
+          activeSkinId,
+          activeAccessoryId
+        );
         scene.add(playerRig.root);
+      }
+
+      // Rebuild expansion parcel 3D structures when a new expansion is built
+      const nextExpansionKey = unlockedExpansionsRef.current.join(',');
+      if (nextExpansionKey !== activeExpansionKey) {
+        scene.remove(expansionGroup);
+        expansionGroup.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) obj.geometry.dispose();
+        });
+        activeExpansionKey = nextExpansionKey;
+        expansionGroup = buildExpansionZone(mats, unlockedExpansionsRef.current);
+        expansionGroup.position.set(14.0, 0, 11.4);
+        scene.add(expansionGroup);
       }
 
       // 1. PLAYER MOVEMENT (Analog + WASD + Raycast Tap-to-Walk)
@@ -814,11 +1212,16 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
           worldVz = dz / d;
         } else {
           const arrivedNpcId = ps.autoInteractNpcId;
+          const arrivedBuildingId = ps.autoInteractBuildingId;
           ps.autoTarget = null;
           ps.autoInteractNpcId = null;
+          ps.autoInteractBuildingId = null;
           if (arrivedNpcId) {
             const st = NPC_STATIONS.find((n) => n.id === arrivedNpcId);
             if (st) interactWithStation(st);
+          } else if (arrivedBuildingId) {
+            soundFX.playClick();
+            onInteractBuildingRef.current?.(arrivedBuildingId);
           }
         }
       }
@@ -831,10 +1234,22 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
         const nextZ = THREE.MathUtils.clamp(ps.z + worldVz * ps.speed * dt, -23.8, 23.8);
 
         const hitsObstacle = (tx: number, tz: number) => {
-          // Pond water check (allow crossing on Stone Bridge |tx|<=1.35 OR Plank Bridge |tx-4.3|<=0.72)
+          // Pond & Winding River check (allow crossing Stone Bridge, East Plank Bridge, East Stream Bridge, West Stream Bridge, or Fishing Pier)
           const onStoneBridge = Math.abs(tx) <= 1.35;
-          const onPlankBridge = Math.abs(tx - 4.3) <= 0.72;
-          if (!onStoneBridge && !onPlankBridge && Math.abs(tx) < 5.8 && tz > -0.7 && tz < 3.9) {
+          const onEastPlankBridge = Math.abs(tx - 4.3) <= 0.72;
+          const onEastStreamBridge = Math.abs(tx - 12.2) <= 0.74;
+          const onWestStreamBridge = Math.abs(tx + 11.5) <= 0.74;
+          const onFishingPier = Math.abs(tx - 2.45) <= 0.62 && tz >= 2.25 && tz <= 4.55;
+
+          const inCentralPond = Math.abs(tx) < 5.8 && tz > -0.7 && tz < 3.9;
+          const inWestStream = tx <= -5.8 && tz > 1.35 && tz < 3.85;
+          const inEastStream = tx >= 5.8 && tz > 0.45 && tz < 2.75;
+
+          if (
+            (inCentralPond && !onStoneBridge && !onEastPlankBridge && !onFishingPier) ||
+            (inWestStream && !onWestStreamBridge) ||
+            (inEastStream && !onEastStreamBridge)
+          ) {
             return true;
           }
           return colliders.some(
@@ -985,16 +1400,23 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
         targetRing.visible = false;
       }
 
-      // 2. SMOOTH ISOMETRIC CAMERA TRACKING & ZOOM
+      // 2. SMOOTH ISOMETRIC CAMERA TRACKING & ZOOM (only update projection matrix when zoom/aspect changes)
       const curW = container.clientWidth || 900;
       const curH = container.clientHeight || 520;
       const curAspect = curW / Math.max(1, curH);
-      const frustumH = frustumBase / zoomRef.current;
-      camera.left = (-frustumH * curAspect) / 2;
-      camera.right = (frustumH * curAspect) / 2;
-      camera.top = frustumH / 2;
-      camera.bottom = -frustumH / 2;
-      camera.updateProjectionMatrix();
+      if (
+        Math.abs(curAspect - lastProjAspect) > 0.0005 ||
+        Math.abs(zoomRef.current - lastProjZoom) > 0.0005
+      ) {
+        const frustumH = frustumBase / zoomRef.current;
+        camera.left = (-frustumH * curAspect) / 2;
+        camera.right = (frustumH * curAspect) / 2;
+        camera.top = frustumH / 2;
+        camera.bottom = -frustumH / 2;
+        camera.updateProjectionMatrix();
+        lastProjAspect = curAspect;
+        lastProjZoom = zoomRef.current;
+      }
 
       camLookTarget.x = THREE.MathUtils.damp(camLookTarget.x, ps.x * 0.85, 6, dt);
       camLookTarget.z = THREE.MathUtils.damp(camLookTarget.z, ps.z * 0.85, 6, dt);
@@ -1037,14 +1459,17 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
         }
       }
 
-      // 3. WATER, WATERWHEEL, WINDMILL, FOUNTAIN & QUEST/NPC ANIMATIONS
+      // 3. WATER, WATERWHEEL, WINDMILL, FOUNTAIN, FISH & VEGETATION SWAY
       mats.waterUniforms.uTime.value = elapsed;
       if (mats.waterfall.map) {
         mats.waterfall.map.offset.y = -(elapsed * 1.15) % 1;
       }
       boatGroup.position.y = 0.16 + Math.sin(elapsed * 1.8) * 0.035;
       boatGroup.rotation.z = Math.sin(elapsed * 1.5) * 0.04;
-      waterMesh.position.y = 0.035 + Math.sin(elapsed * 2.1) * 0.012;
+      const waterRise = 0.035 + Math.sin(elapsed * 2.1) * 0.012;
+      waterMesh.position.y = waterRise;
+      riverWestMesh.position.y = waterRise - 0.004;
+      riverEastMesh.position.y = waterRise - 0.004;
       waterwheelGroup.rotation.x -= dt * 1.25;
       windmillBlades.rotation.z -= dt * (isWindy ? 1.9 : 0.72);
       fountainSpout.scale.y = 0.92 + Math.sin(elapsed * 6.5) * 0.14;
@@ -1052,6 +1477,30 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
         const pulse = 0.92 + Math.sin(elapsed * 5.2 + f * 1.7) * 0.12;
         foamMeshes[f].scale.set(pulse, pulse, 1);
       }
+
+      // Swimming Koi/Carp in the pond
+      for (let fi = 0; fi < fishes.length; fi++) {
+        const fish = fishes[fi];
+        const tAngle = elapsed * fish.speed + fish.phase;
+        const fx = fish.centerX + Math.cos(tAngle) * fish.radiusX;
+        const fz = fish.centerZ + Math.sin(tAngle) * fish.radiusZ;
+        const dxDt = -Math.sin(tAngle) * fish.radiusX * fish.speed;
+        const dzDt = Math.cos(tAngle) * fish.radiusZ * fish.speed;
+        fish.group.position.set(fx, -0.02 + Math.sin(elapsed * 2.6 + fi) * 0.015, fz);
+        fish.group.rotation.y = Math.atan2(dxDt, dzDt);
+        fish.tail.rotation.y = Math.sin(elapsed * 11.0 + fi) * 0.35;
+      }
+
+      // Entrance beacon pulse
+      for (let ri = 0; ri < entranceRings.length; ri++) {
+        const er = entranceRings[ri];
+        const dPlayer = Math.hypot(er.zone.entranceX - ps.x, er.zone.entranceZ - ps.z);
+        const sRing = dPlayer < 2.6 ? 1.15 + Math.sin(elapsed * 5.0) * 0.1 : 1.0 + Math.sin(elapsed * 2.2 + ri) * 0.05;
+        er.mesh.scale.set(sRing, sRing, 1);
+        (er.mesh.material as THREE.MeshBasicMaterial).opacity = dPlayer < 2.6 ? 0.88 : 0.42;
+      }
+
+      vegetationSystem.update(elapsed, isWindy);
 
       npcRigs.forEach((entry) => {
         const { station, rig } = entry;
@@ -1106,7 +1555,7 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
       // Animate multi-layer weather particle system according to active scenario weather
       weatherSystem.update(curWeather, dt, elapsed);
 
-      // 5. UPDATE MINI-MAP & NEARBY NPC HUD (~8 Hz)
+      // 5. UPDATE MINI-MAP & NEARBY NPC / BUILDING HUD (~8 Hz)
       uiTimer += dt;
       if (uiTimer >= 0.12) {
         uiTimer = 0;
@@ -1114,16 +1563,27 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
         const nextPhaseLabel = getTimePhaseLabel(effectivePhase);
         setTimePhaseLabel((prev) => (prev === nextPhaseLabel ? prev : nextPhaseLabel));
 
-        let closest: NpcStation | null = null;
-        let minDist = 2.6;
+        let closestNpc: NpcStation | null = null;
+        let minNpcDist = 2.5;
         for (const st of NPC_STATIONS) {
           const d = Math.hypot(st.x - ps.x, st.z - ps.z);
-          if (d < minDist) {
-            minDist = d;
-            closest = st;
+          if (d < minNpcDist) {
+            minNpcDist = d;
+            closestNpc = st;
           }
         }
-        setNearbyNpc((prev) => (prev?.id === closest?.id ? prev : closest));
+        setNearbyNpc((prev) => (prev?.id === closestNpc?.id ? prev : closestNpc));
+
+        let closestBld: VisitableBuildingZone | null = null;
+        let minBldDist = 2.35;
+        for (const bz of VISITABLE_BUILDINGS) {
+          const d = Math.hypot(bz.entranceX - ps.x, bz.entranceZ - ps.z);
+          if (d < minBldDist) {
+            minBldDist = d;
+            closestBld = bz;
+          }
+        }
+        setNearbyBuilding((prev) => (prev?.id === closestBld?.id ? prev : closestBld));
 
         // Update spatial water stream proximity ("gemericik air" near pond & stone bridge)
         const dxPond = Math.max(0, Math.abs(ps.x) - 5.5);
@@ -1144,15 +1604,24 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
             const toMiniX = (wx: number) => ((wx + 26) / 52) * mw;
             const toMiniY = (wz: number) => ((wz + 26) / 52) * mh;
 
-            // Pond
+            // Pond & Winding River
             mctx.fillStyle = '#38BDF8';
             mctx.globalAlpha = 0.45;
             mctx.fillRect(toMiniX(-5.7), toMiniY(-1.0), (11.4 / 52) * mw, (5.2 / 52) * mh);
+            mctx.fillRect(toMiniX(-24.5), toMiniY(1.4), (18.8 / 52) * mw, (2.4 / 52) * mh);
+            mctx.fillRect(toMiniX(5.7), toMiniY(0.5), (18.8 / 52) * mw, (2.2 / 52) * mh);
             mctx.globalAlpha = 1;
 
             // Hospital & buildings
             colliders.forEach((c) => {
-              mctx.fillStyle = c.id === 'hospital' ? '#FAF9F5' : '#84A98C';
+              if (c.id === 'hospital') mctx.fillStyle = '#FAF9F5';
+              else if (c.id === 'house') mctx.fillStyle = '#60A5FA';
+              else if (c.id === 'boutique') mctx.fillStyle = '#F472B6';
+              else if (c.id === 'pavilion') mctx.fillStyle = '#FBBF24';
+              else if (c.id === 'garden') mctx.fillStyle = '#4ADE80';
+              else if (c.id === 'expansion') mctx.fillStyle = '#D97706';
+              else mctx.fillStyle = '#84A98C';
+
               mctx.fillRect(
                 toMiniX(c.x - c.halfW),
                 toMiniY(c.z - c.halfD),
@@ -1160,6 +1629,10 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
                 ((c.halfD * 2) / 52) * mh
               );
             });
+
+            // Fishing pier marker
+            mctx.fillStyle = '#FDE68A';
+            mctx.fillRect(toMiniX(1.9), toMiniY(2.3), (1.2 / 52) * mw, (2.2 / 52) * mh);
 
             // Patient markers
             NPC_STATIONS.forEach((st) => {
@@ -1184,6 +1657,10 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
       }
 
       renderer.render(scene, camera);
+      if (!firstFrameSent) {
+        firstFrameSent = true;
+        setSceneReady(true);
+      }
 
       if (isSoftwareGl) {
         afterDraw(tick);
@@ -1204,6 +1681,8 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
       clearTimeout(frameId);
       ro.disconnect();
       renderer.domElement.removeEventListener('pointerdown', handlePointerTap);
+      renderer.domElement.removeEventListener('webglcontextlost', handleContextLost);
+      renderer.domElement.removeEventListener('webglcontextrestored', handleContextRestored);
       scene.traverse((obj) => {
         if (obj instanceof THREE.Mesh || obj instanceof THREE.Points) {
           obj.geometry?.dispose();
@@ -1213,16 +1692,19 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
         }
       });
       mats.disposeAll();
+      vegetationSystem.dispose();
       weatherSystem.dispose();
       proxyGeo.dispose();
       proxyMat.dispose();
+      bProxyMat.dispose();
+      entranceRingGeo.dispose();
       envRT.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === container) {
         container.removeChild(renderer.domElement);
       }
     };
-  }, []);
+  }, [graphicsQuality]);
 
   const currentWeather = WEATHER_INFO[weather];
   const playerAvatarProfile = AVATARS.find((a) => a.id === selectedAvatar) || AVATARS[0];
@@ -1278,6 +1760,42 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
       >
         {/* Isolated empty WebGL mount container */}
         <div ref={mountRef} className="w-full h-full cursor-pointer" />
+
+        {/* Kalarma Village Loading Screen Overlay */}
+        {!sceneReady && !contextLost && (
+          <div
+            aria-live="polite"
+            className="absolute inset-0 z-40 bg-[#1B3D2F] text-[#FFF9E9] flex flex-col items-center justify-center p-6 text-center select-none"
+          >
+            <div className="px-4 py-1 rounded-full border border-[#FFE39A]/50 bg-[#255339]/70 text-[#FFE39A] font-display font-bold text-xs tracking-[0.2em] uppercase">
+              A Cozy Fantasy Adventure
+            </div>
+            <div className="font-display font-extrabold text-4xl sm:text-5xl text-[#FFF7DC] mt-2 drop-shadow-[0_3px_0_rgba(32,16,8,0.45)]">
+              Kalarma Village
+            </div>
+            <div className="mt-3 w-48 h-2.5 rounded-full bg-[#12281F] border border-[#E8BC74]/50 overflow-hidden">
+              <div className="h-full w-2/3 bg-gradient-to-r from-[#FFE58B] to-[#EFA93E] animate-pulse rounded-full" />
+            </div>
+            <p className="font-sans text-xs text-[#FFF8E6]/80 mt-2.5">
+              Menyiapkan dunia desa &amp; Klinik Asklepios...
+            </p>
+          </div>
+        )}
+
+        {/* WebGL Context Loss Safe Recovery Banner */}
+        {contextLost && (
+          <div
+            role="alert"
+            className="absolute inset-0 z-40 bg-[#1B3D2F]/90 text-[#FFF9E9] flex flex-col items-center justify-center p-6 text-center"
+          >
+            <div className="font-display font-bold text-2xl text-[#FFE39A]">
+              Memulihkan Tampilan 3D Desa...
+            </div>
+            <p className="text-xs text-[#FFF8E6]/85 mt-1.5 max-w-sm">
+              Sistem grafis sedang mengosongkan memori. Dunia 3D Kalarma Village akan melanjutkan otomatis dalam sekejap.
+            </p>
+          </div>
+        )}
 
         {/* Legacy standalone guidance HUD (hidden when unified GameHUD is overlaid) */}
         {!embeddedInHud && (
@@ -1392,8 +1910,8 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
           </div>
         </div>
 
-        {/* Bottom-Right Context Action Button when near 3D Villager or Mentor */}
-        {nearbyNpc && (
+        {/* Bottom-Right Context Action Button when near 3D Villager, Mentor, or Visitable Building */}
+        {(nearbyNpc || nearbyBuilding) && (
           <div
             className={
               embeddedInHud
@@ -1401,23 +1919,39 @@ export const VillageDiorama3D: React.FC<VillageDiorama3DProps> = ({
                 : 'absolute bottom-4 right-3 sm:bottom-5 sm:right-4 z-20'
             }
           >
-            <button
-              type="button"
-              onClick={() => interactWithStation(nearbyNpc)}
-              className="min-h-[44px] sm:min-h-[50px] max-w-full px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-2xl bg-[#FF5A5F] hover:bg-[#EB494E] border-[2.5px] border-[#FFF8E6] shadow-[0_4px_0_#7F1D1D] text-white font-display font-bold text-sm sm:text-xl inline-flex items-center gap-1.5 sm:gap-2 whitespace-nowrap cursor-pointer"
-            >
-              {nearbyNpc.caseId ? (
-                <>
-                  <Stethoscope className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
-                  <span className="truncate">Periksa {CHARACTERS[nearbyNpc.id].name}</span>
-                </>
-              ) : (
-                <>
-                  <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
-                  <span className="truncate">Bicara: {CHARACTERS[nearbyNpc.id].name}</span>
-                </>
-              )}
-            </button>
+            {nearbyNpc ? (
+              <button
+                type="button"
+                onClick={() => interactWithStation(nearbyNpc)}
+                className="min-h-[44px] sm:min-h-[50px] max-w-full px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-2xl bg-[#FF5A5F] hover:bg-[#EB494E] border-[2.5px] border-[#FFF8E6] shadow-[0_4px_0_#7F1D1D] text-white font-display font-bold text-sm sm:text-xl inline-flex items-center gap-1.5 sm:gap-2 whitespace-nowrap cursor-pointer"
+              >
+                {nearbyNpc.caseId ? (
+                  <>
+                    <Stethoscope className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+                    <span className="truncate">Periksa {CHARACTERS[nearbyNpc.id].name}</span>
+                  </>
+                ) : (
+                  <>
+                    <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+                    <span className="truncate">Bicara: {CHARACTERS[nearbyNpc.id].name}</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              nearbyBuilding && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundFX.playClick();
+                    onInteractBuildingRef.current?.(nearbyBuilding.id);
+                  }}
+                  className="min-h-[44px] sm:min-h-[50px] max-w-full px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-2xl bg-[#2C6E63] hover:bg-[#22564D] border-[2.5px] border-[#FFF8E6] shadow-[0_4px_0_#13342E] text-[#FFF9E9] font-display font-bold text-sm sm:text-xl inline-flex items-center gap-1.5 sm:gap-2 whitespace-nowrap cursor-pointer"
+                >
+                  {BUILDING_ACTION_ICONS[nearbyBuilding.id]}
+                  <span className="truncate">{nearbyBuilding.actionLabel}</span>
+                </button>
+              )
+            )}
           </div>
         )}
 

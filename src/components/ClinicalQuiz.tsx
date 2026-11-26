@@ -47,7 +47,7 @@ export const ClinicalQuiz: React.FC = () => {
             Evaluasi Klinis Gaya UKMPPAI · 6 Studi Kasus Terapan
           </span>
           <h2 className="font-display font-bold text-3xl text-[#2D2926]">
-            Pre-Test &amp; Post-Test Apoteker Muda
+            Pre-Test &amp; Post-Test · Kalarma Village
           </h2>
         </div>
 
